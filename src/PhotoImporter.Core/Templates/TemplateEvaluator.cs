@@ -83,8 +83,13 @@ namespace PhotoImporter.Core.Templates
                         output.Append(extension);
                         break;
                     case TemplateTokenKind.SourceRelativeDirectory:
-                        output.Append(context.SourceRelativeDirectory);
-                        skipLeadingSeparator = context.SourceRelativeDirectory.Length == 0;
+                        if (context.SourceRelativeDirectory.Length > 0)
+                            ValidateRelativePath(context.SourceRelativeDirectory + @"\_", template);
+                        var sourceRelativeDirectory = SelectSourceRelativeDirectory(
+                            context.SourceRelativeDirectory,
+                            part.Format);
+                        output.Append(sourceRelativeDirectory);
+                        skipLeadingSeparator = sourceRelativeDirectory.Length == 0;
                         break;
                     case TemplateTokenKind.ModifiedDate:
                         output.Append(FormatDate(context.ModifiedDate, part.Format, part));
@@ -116,6 +121,19 @@ namespace PhotoImporter.Core.Templates
                 throw new TemplateException(new TemplateError(TemplateErrorCode.PathTooLong, 0, template.Source.Length));
             }
             return relativePath;
+        }
+
+        private static string SelectSourceRelativeDirectory(string relativeDirectory, string depthFormat)
+        {
+            if (depthFormat == null || relativeDirectory.Length == 0)
+                return relativeDirectory;
+
+            var depth = int.Parse(depthFormat, CultureInfo.InvariantCulture);
+            var elements = relativeDirectory.Split('\\');
+            if (depth >= elements.Length)
+                return relativeDirectory;
+
+            return string.Join("\\", elements.Skip(elements.Length - depth));
         }
 
         private static string FormatDate(DateTime value, string format, TemplatePart part)

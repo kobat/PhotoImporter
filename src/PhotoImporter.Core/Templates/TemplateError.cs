@@ -12,6 +12,7 @@ namespace PhotoImporter.Core.Templates
         FormatNotSupported,
         DuplicateSequenceToken,
         InvalidSequenceWidth,
+        InvalidSourceRelativeDirectoryDepth,
         InvalidDateFormat,
         TimeZoneArgumentMissing,
         InvalidTimeZoneCode,

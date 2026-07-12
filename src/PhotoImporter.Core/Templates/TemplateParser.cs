@@ -144,6 +144,23 @@ namespace PhotoImporter.Core.Templates
                 return true;
             }
 
+            if (token == TemplateTokenKind.SourceRelativeDirectory)
+            {
+                int depth;
+                if (format != null &&
+                    (!int.TryParse(format, NumberStyles.None, CultureInfo.InvariantCulture, out depth) ||
+                     depth < 1 || depth.ToString(CultureInfo.InvariantCulture) != format))
+                {
+                    error = new TemplateError(
+                        TemplateErrorCode.InvalidSourceRelativeDirectoryDepth,
+                        position,
+                        length,
+                        token.ToString());
+                    return false;
+                }
+                return true;
+            }
+
             var isDate = token == TemplateTokenKind.ModifiedDate ||
                          token == TemplateTokenKind.TakenDate ||
                          token == TemplateTokenKind.TakenDateLocal;

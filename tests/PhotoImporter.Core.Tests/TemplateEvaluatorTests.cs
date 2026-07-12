@@ -38,6 +38,19 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(@"DCIM\100MSDCF\DSC00001.ARW", TemplateEvaluator.Evaluate(template, context));
         }
 
+        [Theory]
+        [InlineData(1, @"100MSDCF\DSC00001.ARW")]
+        [InlineData(2, @"DCIM\100MSDCF\DSC00001.ARW")]
+        [InlineData(3, @"DCIM\100MSDCF\DSC00001.ARW")]
+        public void SelectsTrailingSourceDirectoryDepth(int depth, string expected)
+        {
+            var template = Parse($@"{{SourceRelativeDirectory:{depth}}}\{{OriginalName}}");
+            var context = new FileTemplateContext(
+                "DSC00001.ARW", new DateTime(2026, 7, 12), 100, @"DCIM\100MSDCF");
+
+            Assert.Equal(expected, TemplateEvaluator.Evaluate(template, context));
+        }
+
         [Fact]
         public void OmitsSeparatorAfterEmptySourceRelativeDirectory()
         {
@@ -59,6 +72,19 @@ namespace PhotoImporter.Core.Tests
                 "DSC00001.ARW", new DateTime(2026, 7, 12), 100, relativeDirectory);
 
             var exception = Assert.Throws<TemplateException>(() => TemplateEvaluator.Evaluate(template, context));
+
+            Assert.Equal(TemplateErrorCode.InvalidPathStructure, exception.Error.Code);
+        }
+
+        [Fact]
+        public void RejectsUnsafeSourceRelativeDirectoryBeforeSelectingDepth()
+        {
+            var template = Parse(@"{SourceRelativeDirectory:1}\{OriginalName}");
+            var context = new FileTemplateContext(
+                "DSC00001.ARW", new DateTime(2026, 7, 12), 100, @"..\outside");
+
+            var exception = Assert.Throws<TemplateException>(() =>
+                TemplateEvaluator.Evaluate(template, context));
 
             Assert.Equal(TemplateErrorCode.InvalidPathStructure, exception.Error.Code);
         }

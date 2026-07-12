@@ -34,6 +34,15 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(TemplateTokenKind.SourceRelativeDirectory, result.Template.Parts[0].Token);
         }
 
+        [Fact]
+        public void ParsesSourceRelativeDirectoryDepth()
+        {
+            var result = TemplateParser.Parse(@"{SourceRelativeDirectory:2}\{OriginalName}");
+
+            Assert.True(result.IsValid);
+            Assert.Equal("2", result.Template.Parts[0].Format);
+        }
+
         [Theory]
         [InlineData("", TemplateErrorCode.TemplateEmpty)]
         [InlineData("{Unknown}", TemplateErrorCode.UnknownToken)]
@@ -41,7 +50,10 @@ namespace PhotoImporter.Core.Tests
         [InlineData("FileName}", TemplateErrorCode.UnexpectedClosingBrace)]
         [InlineData("{}", TemplateErrorCode.TokenNameEmpty)]
         [InlineData("{FileName:x}", TemplateErrorCode.FormatNotSupported)]
-        [InlineData("{SourceRelativeDirectory:x}", TemplateErrorCode.FormatNotSupported)]
+        [InlineData("{SourceRelativeDirectory:x}", TemplateErrorCode.InvalidSourceRelativeDirectoryDepth)]
+        [InlineData("{SourceRelativeDirectory:0}", TemplateErrorCode.InvalidSourceRelativeDirectoryDepth)]
+        [InlineData("{SourceRelativeDirectory:01}", TemplateErrorCode.InvalidSourceRelativeDirectoryDepth)]
+        [InlineData("{SourceRelativeDirectory:-1}", TemplateErrorCode.InvalidSourceRelativeDirectoryDepth)]
         [InlineData("{Sequence}{Sequence}", TemplateErrorCode.DuplicateSequenceToken)]
         [InlineData("{Sequence:0}", TemplateErrorCode.InvalidSequenceWidth)]
         [InlineData("{Sequence:10}", TemplateErrorCode.InvalidSequenceWidth)]
