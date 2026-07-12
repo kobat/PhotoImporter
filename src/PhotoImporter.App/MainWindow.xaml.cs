@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows;
@@ -77,7 +78,8 @@ namespace PhotoImporter.App
                 var destinationRoot = Path.GetFullPath(DestinationFolder);
                 if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException("コピー元フォルダーが見つかりません。");
                 if (!Directory.Exists(destinationRoot)) throw new DirectoryNotFoundException("コピー先フォルダーが見つかりません。");
-                if (PathsEqual(sourceRoot, destinationRoot)) throw new InvalidOperationException("コピー元とコピー先には異なるフォルダーを指定してください。");
+                if (IsSameOrUnder(sourceRoot, destinationRoot) || IsSameOrUnder(destinationRoot, sourceRoot))
+                    throw new InvalidOperationException("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
 
                 var parseResult = TemplateParser.Parse(TemplateText);
                 if (!parseResult.IsValid)
@@ -92,8 +94,11 @@ namespace PhotoImporter.App
                 foreach (var row in rows) Items.Add(row);
 
                 var imported = 0;
+                var scanErrors = 0;
                 foreach (var row in rows) if (row.IsImported) imported++;
-                Summary = string.Format("{0} 件（未取込 {1} / 取込済 {2}）", rows.Count, rows.Count - imported, imported);
+                foreach (var row in rows) if (row.IsScanError) scanErrors++;
+                Summary = string.Format("{0} 件（未取込 {1} / 取込済 {2} / エラー {3}）",
+                    rows.Count - scanErrors, rows.Count - imported - scanErrors, imported, scanErrors);
                 SetMessage(rows.Count == 0 ? "コピー元にファイルがありません。" : "プレビューを更新しました。", Brushes.DimGray);
             }
             catch (TemplateException ex) { ShowTemplateError(ex.Error); }
@@ -111,16 +116,62 @@ namespace PhotoImporter.App
         {
             var result = new List<PreviewItem>();
             var allocator = new DestinationAllocator(template, new FileSystemDestinationLookup(destinationRoot));
-            foreach (var path in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+            var scan = EnumerateSourceFiles(sourceRoot);
+            foreach (var issue in scan.Issues)
+                result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
+
+            foreach (var path in scan.Files.OrderBy(
+                item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase))
             {
-                if (IsUnder(path, destinationRoot)) continue;
-                var info = new FileInfo(path);
-                var allocation = allocator.Allocate(new FileTemplateContext(info.Name, info.LastWriteTime, info.Length));
-                result.Add(new PreviewItem(
-                    MakeRelative(sourceRoot, path),
-                    allocation.RelativePath,
-                    allocation.Status == DestinationStatus.Imported));
+                try
+                {
+                    var info = new FileInfo(path);
+                    var sourcePath = MakeRelative(sourceRoot, path);
+                    var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+                    var allocation = allocator.Allocate(new FileTemplateContext(
+                        info.Name, info.LastWriteTime, info.Length, relativeDirectory));
+                    result.Add(new PreviewItem(
+                        sourcePath,
+                        allocation.RelativePath,
+                        allocation.Status == DestinationStatus.Imported));
+                }
+                catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
+                catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
             }
+            return result;
+        }
+
+        private static SourceScanResult EnumerateSourceFiles(string sourceRoot)
+        {
+            var result = new SourceScanResult();
+            var pending = new Stack<string>();
+            pending.Push(sourceRoot);
+
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                FileSystemInfo[] entries;
+                try
+                {
+                    entries = new DirectoryInfo(directory).GetFileSystemInfos();
+                }
+                catch (UnauthorizedAccessException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, directory), ex.Message)); continue; }
+                catch (IOException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, directory), ex.Message)); continue; }
+
+                foreach (var entry in entries.OrderByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                        var childDirectory = entry as DirectoryInfo;
+                        if (childDirectory != null) pending.Push(childDirectory.FullName);
+                        else if (entry is FileInfo) result.Files.Add(entry.FullName);
+                    }
+                    catch (UnauthorizedAccessException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, entry.FullName), ex.Message)); }
+                    catch (IOException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, entry.FullName), ex.Message)); }
+                }
+            }
+
             return result;
         }
 
@@ -137,10 +188,38 @@ namespace PhotoImporter.App
             SetMessage(string.Format("テンプレートエラー: {0}（位置 {1}）", error.Code, error.Position + 1), Brushes.Firebrick);
 
         private void SetMessage(string value, Brush brush) { Message = value; MessageBrush = brush; }
-        private static bool PathsEqual(string first, string second) => string.Equals(TrimPath(first), TrimPath(second), StringComparison.OrdinalIgnoreCase);
-        private static string TrimPath(string path) => path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        private static bool IsUnder(string path, string root) => Path.GetFullPath(path).StartsWith(TrimPath(Path.GetFullPath(root)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-        private static string MakeRelative(string root, string path) => new Uri(TrimPath(root) + Path.DirectorySeparatorChar).MakeRelativeUri(new Uri(path)).ToString().Replace('/', '\\');
+        private static bool IsSameOrUnder(string path, string root)
+        {
+            var candidate = NormalizePath(path);
+            var normalizedRoot = NormalizePath(root);
+            return string.Equals(candidate, normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+                   candidate.StartsWith(EnsureTrailingSeparator(normalizedRoot), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string MakeRelative(string root, string path)
+        {
+            var normalizedRoot = NormalizePath(root);
+            var normalizedPath = NormalizePath(path);
+            if (string.Equals(normalizedRoot, normalizedPath, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+            var prefix = EnsureTrailingSeparator(normalizedRoot);
+            if (!normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("コピー元フォルダー外のパスは処理できません。");
+            return normalizedPath.Substring(prefix.Length);
+        }
+
+        private static string NormalizePath(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetPathRoot(fullPath);
+            return string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase)
+                ? fullPath
+                : fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        private static string EnsureTrailingSeparator(string path) =>
+            path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? path
+                : path + Path.DirectorySeparatorChar;
 
         private bool Set<T>(ref T field, T value, [CallerMemberName] string name = null)
         {
@@ -164,7 +243,25 @@ namespace PhotoImporter.App
         public string SourcePath { get; }
         public string DestinationPath { get; }
         public bool IsImported { get; }
-        public string Status => IsImported ? "取込済" : "未取込";
+        public bool IsScanError { get; private set; }
+        public string ErrorMessage { get; private set; }
+        public string Status => IsScanError ? "スキャンエラー: " + ErrorMessage : IsImported ? "取込済" : "未取込";
+
+        public static PreviewItem ForScanError(string sourcePath, string message) =>
+            new PreviewItem(sourcePath, string.Empty, false) { IsScanError = true, ErrorMessage = message };
+    }
+
+    internal sealed class SourceScanResult
+    {
+        public List<string> Files { get; } = new List<string>();
+        public List<ScanIssue> Issues { get; } = new List<ScanIssue>();
+    }
+
+    internal sealed class ScanIssue
+    {
+        public ScanIssue(string path, string message) { Path = path; Message = message; }
+        public string Path { get; }
+        public string Message { get; }
     }
 
     internal sealed class FileSystemDestinationLookup : IDestinationFileLookup

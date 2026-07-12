@@ -28,6 +28,41 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal("photo.backup_0002.JPG", TemplateEvaluator.Evaluate(template, Context, 2));
         }
 
+        [Fact]
+        public void PreservesNestedSourceRelativeDirectory()
+        {
+            var template = Parse(@"{SourceRelativeDirectory}\{OriginalName}");
+            var context = new FileTemplateContext(
+                "DSC00001.ARW", new DateTime(2026, 7, 12), 100, @"DCIM\100MSDCF");
+
+            Assert.Equal(@"DCIM\100MSDCF\DSC00001.ARW", TemplateEvaluator.Evaluate(template, context));
+        }
+
+        [Fact]
+        public void OmitsSeparatorAfterEmptySourceRelativeDirectory()
+        {
+            var template = Parse(@"{SourceRelativeDirectory}\{OriginalName}");
+            var context = new FileTemplateContext(
+                "DSC00001.ARW", new DateTime(2026, 7, 12), 100, string.Empty);
+
+            Assert.Equal("DSC00001.ARW", TemplateEvaluator.Evaluate(template, context));
+        }
+
+        [Theory]
+        [InlineData(@"..\outside")]
+        [InlineData(@"folder\\child")]
+        [InlineData(@"\rooted")]
+        public void RejectsUnsafeSourceRelativeDirectory(string relativeDirectory)
+        {
+            var template = Parse(@"{SourceRelativeDirectory}\{OriginalName}");
+            var context = new FileTemplateContext(
+                "DSC00001.ARW", new DateTime(2026, 7, 12), 100, relativeDirectory);
+
+            var exception = Assert.Throws<TemplateException>(() => TemplateEvaluator.Evaluate(template, context));
+
+            Assert.Equal(TemplateErrorCode.InvalidPathStructure, exception.Error.Code);
+        }
+
         [Theory]
         [InlineData(@"\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
         [InlineData(@"folder\\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]

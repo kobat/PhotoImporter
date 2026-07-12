@@ -10,18 +10,25 @@ namespace PhotoImporter.Core.Templates
 {
     public sealed class FileTemplateContext
     {
-        public FileTemplateContext(string originalName, DateTime modifiedDate, long fileSize)
+        public FileTemplateContext(
+            string originalName,
+            DateTime modifiedDate,
+            long fileSize,
+            string sourceRelativeDirectory = "")
         {
             if (originalName == null) throw new ArgumentNullException(nameof(originalName));
             if (fileSize < 0) throw new ArgumentOutOfRangeException(nameof(fileSize));
+            if (sourceRelativeDirectory == null) throw new ArgumentNullException(nameof(sourceRelativeDirectory));
             OriginalName = originalName;
             ModifiedDate = modifiedDate;
             FileSize = fileSize;
+            SourceRelativeDirectory = sourceRelativeDirectory;
         }
 
         public string OriginalName { get; }
         public DateTime ModifiedDate { get; }
         public long FileSize { get; }
+        public string SourceRelativeDirectory { get; }
     }
 
     public static class TemplateEvaluator
@@ -48,15 +55,22 @@ namespace PhotoImporter.Core.Templates
             var extension = Path.GetExtension(context.OriginalName);
             var fileName = Path.GetFileNameWithoutExtension(context.OriginalName);
             var output = new StringBuilder();
+            var skipLeadingSeparator = false;
 
-            foreach (var part in template.Parts)
+            for (var partIndex = 0; partIndex < template.Parts.Count; partIndex++)
             {
+                var part = template.Parts[partIndex];
                 if (!part.Token.HasValue)
                 {
-                    output.Append(part.Literal);
+                    if (skipLeadingSeparator && part.Literal.StartsWith("\\", StringComparison.Ordinal))
+                        output.Append(part.Literal.Substring(1));
+                    else
+                        output.Append(part.Literal);
+                    skipLeadingSeparator = false;
                     continue;
                 }
 
+                skipLeadingSeparator = false;
                 switch (part.Token.Value)
                 {
                     case TemplateTokenKind.OriginalName:
@@ -67,6 +81,10 @@ namespace PhotoImporter.Core.Templates
                         break;
                     case TemplateTokenKind.Extension:
                         output.Append(extension);
+                        break;
+                    case TemplateTokenKind.SourceRelativeDirectory:
+                        output.Append(context.SourceRelativeDirectory);
+                        skipLeadingSeparator = context.SourceRelativeDirectory.Length == 0;
                         break;
                     case TemplateTokenKind.ModifiedDate:
                         output.Append(FormatDate(context.ModifiedDate, part.Format, part));

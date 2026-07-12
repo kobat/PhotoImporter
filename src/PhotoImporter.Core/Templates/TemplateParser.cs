@@ -13,6 +13,7 @@ namespace PhotoImporter.Core.Templates
                 ["OriginalName"] = TemplateTokenKind.OriginalName,
                 ["FileName"] = TemplateTokenKind.FileName,
                 ["Extension"] = TemplateTokenKind.Extension,
+                ["SourceRelativeDirectory"] = TemplateTokenKind.SourceRelativeDirectory,
                 ["ModifiedDate"] = TemplateTokenKind.ModifiedDate,
                 ["FileSize"] = TemplateTokenKind.FileSize,
                 ["Sequence"] = TemplateTokenKind.Sequence,

@@ -57,6 +57,19 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void SameNamedFilesInDifferentSourceDirectoriesUseDifferentDestinations()
+        {
+            var template = Parse(@"{SourceRelativeDirectory}\{OriginalName}");
+            var allocator = new DestinationAllocator(template, new DictionaryLookup(new Dictionary<string, long>()));
+
+            var first = allocator.Allocate(new FileTemplateContext("A.jpg", new DateTime(2026, 7, 12), 100, "one"));
+            var second = allocator.Allocate(new FileTemplateContext("A.jpg", new DateTime(2026, 7, 12), 100, "two"));
+
+            Assert.Equal(@"one\A.jpg", first.RelativePath);
+            Assert.Equal(@"two\A.jpg", second.RelativePath);
+        }
+
+        [Fact]
         public void ConflictingTemplateWithoutSequenceFails()
         {
             var template = Parse("{FileName}{Extension}");

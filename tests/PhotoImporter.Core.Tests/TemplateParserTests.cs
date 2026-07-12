@@ -24,6 +24,16 @@ namespace PhotoImporter.Core.Tests
             Assert.True(result.Template.RequiresExif);
         }
 
+        [Fact]
+        public void ParsesSourceRelativeDirectoryWithoutExif()
+        {
+            var result = TemplateParser.Parse(@"{SourceRelativeDirectory}\{OriginalName}");
+
+            Assert.True(result.IsValid);
+            Assert.False(result.Template.RequiresExif);
+            Assert.Equal(TemplateTokenKind.SourceRelativeDirectory, result.Template.Parts[0].Token);
+        }
+
         [Theory]
         [InlineData("", TemplateErrorCode.TemplateEmpty)]
         [InlineData("{Unknown}", TemplateErrorCode.UnknownToken)]
@@ -31,6 +41,7 @@ namespace PhotoImporter.Core.Tests
         [InlineData("FileName}", TemplateErrorCode.UnexpectedClosingBrace)]
         [InlineData("{}", TemplateErrorCode.TokenNameEmpty)]
         [InlineData("{FileName:x}", TemplateErrorCode.FormatNotSupported)]
+        [InlineData("{SourceRelativeDirectory:x}", TemplateErrorCode.FormatNotSupported)]
         [InlineData("{Sequence}{Sequence}", TemplateErrorCode.DuplicateSequenceToken)]
         [InlineData("{Sequence:0}", TemplateErrorCode.InvalidSequenceWidth)]
         [InlineData("{Sequence:10}", TemplateErrorCode.InvalidSequenceWidth)]

@@ -8,6 +8,7 @@ namespace PhotoImporter.Core.Templates
         OriginalName,
         FileName,
         Extension,
+        SourceRelativeDirectory,
         ModifiedDate,
         FileSize,
         Sequence,
