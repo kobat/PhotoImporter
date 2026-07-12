@@ -53,18 +53,19 @@ Windows 用デスクトップアプリ。カメラ・SDカード・CFexpress カ
 - 基本形は `{Token}`、書式対応トークンは `{Token:Format}`
 - 既定テンプレートは `{TakenDate:yyyy-MM-dd}\{FileName}{Sequence}{Extension}`
 - v1 のファイルシステム系トークンは `{OriginalName}` `{FileName}` `{Extension}` `{ModifiedDate}` `{FileSize}` `{Sequence}`
-- v1 の Exif 系トークンは `{TakenDate}` `{CameraMake}` `{CameraModel}` `{Lens}`
-- `{Sequence}` は競合がなければ空文字、競合時は `_0001` から4桁で付与する
+- v1 の Exif 系トークンは `{TakenDate}` `{TakenDateLocal}` `{TakenDateInTimeZone}` `{CameraMake}` `{CameraModel}` `{Lens}`
+- Exif撮影日時は、タイムゾーン未考慮、PCのタイムゾーン、指定したタイムゾーンの3方式を選べる。指定には `JST` などアプリ定義の3文字コード、または `UTC+9` などUTCからの固定時差を使用する
+- `{Sequence}` は競合がなければ空文字、競合時は既定3桁の `_001` から付与する。`{Sequence:4}` のように桁数を指定できる
 
 トークンは2分類:
 
 | 分類 | トークン例 | コスト |
 |---|---|---|
 | ファイルシステム系 | `{OriginalName}` `{FileName}` `{Extension}` `{ModifiedDate:書式}` `{FileSize}` `{Sequence}` | `{Sequence}` の競合確認以外はゼロ(列挙時に取得済み) |
-| Exif系 | `{TakenDate:書式}` `{CameraMake}` `{CameraModel}` `{Lens}` | ヘッダ読み込みが必要 |
+| Exif系 | `{TakenDate:書式}` `{TakenDateLocal:書式}` `{TakenDateInTimeZone:JST}` `{TakenDateInTimeZone:UTC+9}` `{CameraMake}` `{CameraModel}` `{Lens}` | ヘッダ読み込みが必要 |
 
 - テンプレート解析時点で「Exif系トークンを含むか」が静的に判定できる → ファイルシステム系のみなら Exif を読まずに全宛先パスを即計算できる
-- Exif が無いファイル(動画・一部RAW)では `{TakenDate}` を更新日時へフォールバックする
+- Exif が無いファイル(動画・一部RAW)では各撮影日時トークンを更新日時へフォールバックする
 - 日時書式は .NET のカスタム日時書式を `InvariantCulture` で解釈する
 - テンプレートから生成されるパスは必ず相対パスとし、絶対パス・親ディレクトリ参照・不正文字を拒否する
 - UI上のトークン説明、入力エラー、プレビュー状態は日本語・英語にローカライズする
@@ -78,7 +79,7 @@ Windows 用デスクトップアプリ。カメラ・SDカード・CFexpress カ
 
 ### Exif 系テンプレート使用時の高速化: Exif キャッシュ
 
-1. キャッシュのキー: `(ボリュームシリアル番号, 相対パス, ファイルサイズ, 更新日時)` → 値: 撮影日時・カメラ名などの抽出済み Exif
+1. キャッシュのキー: `(ボリュームシリアル番号, 相対パス, ファイルサイズ, 更新日時)` → 値: 撮影日時・撮影日時オフセット・カメラ名などの抽出済み Exif
 2. カード挿入 → ファイル列挙(速い)→ キャッシュヒット分は Exif 読み込みスキップ
 3. キャッシュミス分のみ並列(4〜8並列)でヘッダ読み込み
 
@@ -86,9 +87,9 @@ Windows 用デスクトップアプリ。カメラ・SDカード・CFexpress カ
 
 ### 判定の3状態
 
-- **未取込**: 宛先に無い。`{Sequence}` がある場合は、必要に応じて `_0001` から空いている番号を付与した宛先を使用する
+- **未取込**: 宛先に無い。`{Sequence}` がある場合は、必要に応じて既定3桁の `_001` から空いている番号を付与した宛先を使用する
 - **取込済**: 宛先に有り・サイズ一致
-- **競合**: `{Sequence}` がない場合に、宛先に同名だがサイズ不一致。または4桁で表現できる連番を使い切った場合
+- **競合**: `{Sequence}` がない場合に、宛先に同名だがサイズ不一致。または指定された桁数で表現できる連番を使い切った場合
 
 ## 5. 画面イメージ
 
