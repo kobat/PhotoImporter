@@ -1,3 +1,4 @@
+using PhotoImporter.Core.Copying;
 using PhotoImporter.Core.Templates;
 using System;
 using System.Collections.Generic;
@@ -6,6 +7,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
@@ -20,8 +22,14 @@ namespace PhotoImporter.App
         private string _templateText = @"{ModifiedDate:yyyy-MM-dd}\{FileName}{Sequence}{Extension}";
         private string _message = "コピー元とコピー先を選択して、スキャンしてください。";
         private string _summary = "0 件";
+        private string _progressText = string.Empty;
         private Brush _messageBrush = Brushes.DimGray;
-        private bool _isScanning;
+        private bool _isBusy;
+        private bool _isCopying;
+        private bool _overwriteExisting;
+        private bool _previewIsCurrent;
+        private double _progressPercent;
+        private CancellationTokenSource _copyCancellation;
 
         public MainWindow()
         {
@@ -36,27 +44,40 @@ namespace PhotoImporter.App
         public string SourceFolder
         {
             get => _sourceFolder;
-            set { if (Set(ref _sourceFolder, value)) OnPropertyChanged(nameof(CanScan)); }
+            set { if (Set(ref _sourceFolder, value)) SettingsChanged(); }
         }
 
         public string DestinationFolder
         {
             get => _destinationFolder;
-            set { if (Set(ref _destinationFolder, value)) OnPropertyChanged(nameof(CanScan)); }
+            set { if (Set(ref _destinationFolder, value)) SettingsChanged(); }
         }
 
         public string TemplateText
         {
             get => _templateText;
-            set { if (Set(ref _templateText, value)) OnPropertyChanged(nameof(CanScan)); }
+            set { if (Set(ref _templateText, value)) SettingsChanged(); }
+        }
+
+        public bool OverwriteExisting
+        {
+            get => _overwriteExisting;
+            set { if (Set(ref _overwriteExisting, value)) SettingsChanged(); }
         }
 
         public string Message { get => _message; private set => Set(ref _message, value); }
         public string Summary { get => _summary; private set => Set(ref _summary, value); }
+        public string ProgressText { get => _progressText; private set => Set(ref _progressText, value); }
         public Brush MessageBrush { get => _messageBrush; private set => Set(ref _messageBrush, value); }
-        public bool CanScan => !_isScanning && !string.IsNullOrWhiteSpace(SourceFolder) &&
+        public double ProgressPercent { get => _progressPercent; private set => Set(ref _progressPercent, value); }
+        public Visibility ProgressVisibility => _isCopying ? Visibility.Visible : Visibility.Collapsed;
+        public bool CanEditSettings => !_isBusy;
+        public bool CanSelectItems => !_isBusy;
+        public bool CanCancel => _isCopying;
+        public bool CanScan => !_isBusy && !string.IsNullOrWhiteSpace(SourceFolder) &&
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
                                !string.IsNullOrWhiteSpace(TemplateText);
+        public bool CanCopy => !_isBusy && _previewIsCurrent && Items.Any(item => item.IsSelected && item.CanCopy);
 
         private void SelectSource_Click(object sender, RoutedEventArgs e) =>
             SourceFolder = SelectFolder(SourceFolder, "コピー元フォルダーを選択してください") ?? SourceFolder;
@@ -66,9 +87,14 @@ namespace PhotoImporter.App
 
         private async void Scan_Click(object sender, RoutedEventArgs e)
         {
-            _isScanning = true;
-            OnPropertyChanged(nameof(CanScan));
+            await ScanAsync();
+        }
+
+        private async Task<bool> ScanAsync()
+        {
+            SetBusy(true, false);
             Items.Clear();
+            _previewIsCurrent = false;
             Summary = "スキャン中...";
             SetMessage("ファイルを調べています...", Brushes.DimGray);
 
@@ -76,46 +102,130 @@ namespace PhotoImporter.App
             {
                 var sourceRoot = Path.GetFullPath(SourceFolder);
                 var destinationRoot = Path.GetFullPath(DestinationFolder);
-                if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException("コピー元フォルダーが見つかりません。");
-                if (!Directory.Exists(destinationRoot)) throw new DirectoryNotFoundException("コピー先フォルダーが見つかりません。");
-                if (IsSameOrUnder(sourceRoot, destinationRoot) || IsSameOrUnder(destinationRoot, sourceRoot))
-                    throw new InvalidOperationException("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
+                ValidateRoots(sourceRoot, destinationRoot);
 
                 var parseResult = TemplateParser.Parse(TemplateText);
                 if (!parseResult.IsValid)
                 {
                     ShowTemplateError(parseResult.Error);
-                    return;
+                    return false;
                 }
                 if (parseResult.Template.RequiresExif)
                     throw new NotSupportedException("Exifトークンは、次の開発段階で対応します。現在はファイル名・更新日時・サイズのトークンを使用してください。");
 
-                var rows = await Task.Run(() => BuildPreview(sourceRoot, destinationRoot, parseResult.Template));
-                foreach (var row in rows) Items.Add(row);
+                var overwrite = OverwriteExisting;
+                var rows = await Task.Run(() => BuildPreview(sourceRoot, destinationRoot, parseResult.Template, overwrite));
+                foreach (var row in rows)
+                {
+                    row.PropertyChanged += PreviewItem_PropertyChanged;
+                    Items.Add(row);
+                }
 
-                var imported = 0;
-                var scanErrors = 0;
-                foreach (var row in rows) if (row.IsImported) imported++;
-                foreach (var row in rows) if (row.IsScanError) scanErrors++;
-                Summary = string.Format("{0} 件（未取込 {1} / 取込済 {2} / エラー {3}）",
-                    rows.Count - scanErrors, rows.Count - imported - scanErrors, imported, scanErrors);
+                _previewIsCurrent = true;
+                UpdateSummary();
                 SetMessage(rows.Count == 0 ? "コピー元にファイルがありません。" : "プレビューを更新しました。", Brushes.DimGray);
+                return true;
             }
             catch (TemplateException ex) { ShowTemplateError(ex.Error); }
             catch (UnauthorizedAccessException) { SetMessage("アクセスできないフォルダーがあります。権限を確認してください。", Brushes.Firebrick); }
             catch (Exception ex) { SetMessage(ex.Message, Brushes.Firebrick); }
             finally
             {
-                _isScanning = false;
-                OnPropertyChanged(nameof(CanScan));
+                SetBusy(false, false);
                 if (Summary == "スキャン中...") Summary = "0 件";
+            }
+            return false;
+        }
+
+        private async void Copy_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = Items.Where(item => item.IsSelected && item.CanCopy).ToList();
+            if (selected.Count == 0) return;
+
+            _copyCancellation = new CancellationTokenSource();
+            SetBusy(true, true);
+            SetMessage("コピーしています...", Brushes.DimGray);
+            ProgressPercent = 0;
+
+            CopyBatchResult result = null;
+            try
+            {
+                var progress = new Progress<CopyProgress>(UpdateCopyProgress);
+                result = await Task.Run(() => new CopyEngine().Execute(
+                    selected.Select(item => item.CopyPlan),
+                    progress,
+                    _copyCancellation.Token));
+            }
+            catch (Exception ex)
+            {
+                SetMessage(ex.Message, Brushes.Firebrick);
+            }
+            finally
+            {
+                _copyCancellation.Dispose();
+                _copyCancellation = null;
+                SetBusy(false, false);
+            }
+
+            if (result == null) return;
+
+            var copied = result.Items.Count(item => item.Status == CopyItemStatus.Copied);
+            var failed = result.Items.Count(item => item.Status == CopyItemStatus.Failed);
+            var errors = result.Items
+                .Where(item => item.Status != CopyItemStatus.Copied)
+                .ToDictionary(
+                    item => MakeRelative(Path.GetFullPath(SourceFolder), item.Item.SourcePath),
+                    item => item.RecoveryPath == null
+                        ? item.Error
+                        : item.Error + " 保全した一時ファイル: " + item.RecoveryPath,
+                    StringComparer.OrdinalIgnoreCase);
+
+            var rescanned = await ScanAsync();
+            if (rescanned)
+            {
+                foreach (var row in Items)
+                {
+                    string error;
+                    if (errors.TryGetValue(row.SourcePath, out error)) row.SetCopyError(error);
+                }
+                SetMessage(
+                    string.Format("コピー完了: 成功 {0} / エラー {1}{2}。再スキャンしました。",
+                        copied, failed, result.Cancelled ? " / キャンセル" : string.Empty),
+                    failed > 0 ? Brushes.Firebrick : Brushes.DimGray);
+                UpdateSummary();
             }
         }
 
-        private static List<PreviewItem> BuildPreview(string sourceRoot, string destinationRoot, ParsedTemplate template)
+        private void Cancel_Click(object sender, RoutedEventArgs e)
+        {
+            _copyCancellation?.Cancel();
+            SetMessage("キャンセルしています...", Brushes.DimGray);
+        }
+
+        private void UpdateCopyProgress(CopyProgress progress)
+        {
+            ProgressPercent = progress.TotalBytes == 0
+                ? 0
+                : Math.Min(100, progress.TransferredBytes * 100.0 / progress.TotalBytes);
+            ProgressText = string.Format(
+                "{0}/{1} 件  {2}/{3}",
+                progress.CompletedFiles,
+                progress.TotalFiles,
+                FormatBytes(progress.TransferredBytes),
+                FormatBytes(progress.TotalBytes));
+        }
+
+        private static List<PreviewItem> BuildPreview(
+            string sourceRoot,
+            string destinationRoot,
+            ParsedTemplate template,
+            bool overwriteExisting)
         {
             var result = new List<PreviewItem>();
-            var allocator = new DestinationAllocator(template, new FileSystemDestinationLookup(destinationRoot));
+            var allocator = new DestinationAllocator(
+                template,
+                new FileSystemDestinationLookup(destinationRoot),
+                overwriteExisting);
             var scan = EnumerateSourceFiles(sourceRoot);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
@@ -128,15 +238,25 @@ namespace PhotoImporter.App
                     var info = new FileInfo(path);
                     var sourcePath = MakeRelative(sourceRoot, path);
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
-                    var allocation = allocator.Allocate(new FileTemplateContext(
-                        info.Name, info.LastWriteTime, info.Length, relativeDirectory));
-                    result.Add(new PreviewItem(
-                        sourcePath,
-                        allocation.RelativePath,
-                        allocation.Status == DestinationStatus.Imported));
+                    var allocation = allocator.Allocate(
+                        new FileTemplateContext(info.Name, info.LastWriteTime, info.Length, relativeDirectory),
+                        info.LastWriteTimeUtc);
+                    var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
+                    var plan = allocation.Status == DestinationStatus.NotImported ||
+                               allocation.Status == DestinationStatus.Overwrite
+                        ? new CopyPlanItem(
+                            info.FullName,
+                            destinationRoot,
+                            destinationPath,
+                            new FileSnapshot(info.Length, info.LastWriteTimeUtc),
+                            allocation.DestinationSnapshot,
+                            allocation.Status == DestinationStatus.Overwrite)
+                        : null;
+                    result.Add(new PreviewItem(sourcePath, allocation.RelativePath, allocation.Status, plan));
                 }
                 catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
+                catch (TemplateException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString())); }
             }
             return result;
         }
@@ -151,10 +271,7 @@ namespace PhotoImporter.App
             {
                 var directory = pending.Pop();
                 FileSystemInfo[] entries;
-                try
-                {
-                    entries = new DirectoryInfo(directory).GetFileSystemInfos();
-                }
+                try { entries = new DirectoryInfo(directory).GetFileSystemInfos(); }
                 catch (UnauthorizedAccessException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, directory), ex.Message)); continue; }
                 catch (IOException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, directory), ex.Message)); continue; }
 
@@ -171,8 +288,57 @@ namespace PhotoImporter.App
                     catch (IOException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, entry.FullName), ex.Message)); }
                 }
             }
-
             return result;
+        }
+
+        private void PreviewItem_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(PreviewItem.IsSelected))
+            {
+                OnPropertyChanged(nameof(CanCopy));
+                UpdateSummary();
+            }
+        }
+
+        private void UpdateSummary()
+        {
+            var rows = Items.Where(item => !item.IsScanError).ToList();
+            Summary = string.Format(
+                "{0} 件（対象 {1} / 未取込 {2} / 上書き {3} / 取込済 {4} / 競合・エラー {5}）",
+                rows.Count,
+                rows.Count(item => item.IsSelected && item.CanCopy),
+                rows.Count(item => item.DestinationStatus == DestinationStatus.NotImported),
+                rows.Count(item => item.DestinationStatus == DestinationStatus.Overwrite),
+                rows.Count(item => item.DestinationStatus == DestinationStatus.Imported),
+                Items.Count(item => item.IsScanError || item.DestinationStatus == DestinationStatus.Conflict));
+        }
+
+        private void SettingsChanged()
+        {
+            _previewIsCurrent = false;
+            OnPropertyChanged(nameof(CanScan));
+            OnPropertyChanged(nameof(CanCopy));
+        }
+
+        private void SetBusy(bool busy, bool copying)
+        {
+            _isBusy = busy;
+            _isCopying = copying;
+            OnPropertyChanged(nameof(CanEditSettings));
+            OnPropertyChanged(nameof(CanSelectItems));
+            OnPropertyChanged(nameof(CanCancel));
+            OnPropertyChanged(nameof(CanScan));
+            OnPropertyChanged(nameof(CanCopy));
+            OnPropertyChanged(nameof(ProgressVisibility));
+            if (!copying) ProgressText = string.Empty;
+        }
+
+        private static void ValidateRoots(string sourceRoot, string destinationRoot)
+        {
+            if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException("コピー元フォルダーが見つかりません。");
+            if (!Directory.Exists(destinationRoot)) throw new DirectoryNotFoundException("コピー先フォルダーが見つかりません。");
+            if (IsSameOrUnder(sourceRoot, destinationRoot) || IsSameOrUnder(destinationRoot, sourceRoot))
+                throw new InvalidOperationException("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
         }
 
         private static string SelectFolder(string initialPath, string description)
@@ -186,8 +352,8 @@ namespace PhotoImporter.App
 
         private void ShowTemplateError(TemplateError error) =>
             SetMessage(string.Format("テンプレートエラー: {0}（位置 {1}）", error.Code, error.Position + 1), Brushes.Firebrick);
-
         private void SetMessage(string value, Brush brush) { Message = value; MessageBrush = brush; }
+
         private static bool IsSameOrUnder(string path, string root)
         {
             var candidate = NormalizePath(path);
@@ -221,6 +387,14 @@ namespace PhotoImporter.App
                 ? path
                 : path + Path.DirectorySeparatorChar;
 
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes >= 1024L * 1024 * 1024) return (bytes / (1024d * 1024 * 1024)).ToString("0.0") + " GB";
+            if (bytes >= 1024L * 1024) return (bytes / (1024d * 1024)).ToString("0.0") + " MB";
+            if (bytes >= 1024) return (bytes / 1024d).ToString("0.0") + " KB";
+            return bytes + " B";
+        }
+
         private bool Set<T>(ref T field, T value, [CallerMemberName] string name = null)
         {
             if (EqualityComparer<T>.Default.Equals(field, value)) return false;
@@ -229,26 +403,75 @@ namespace PhotoImporter.App
             return true;
         }
 
-        private void OnPropertyChanged([CallerMemberName] string name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        private void OnPropertyChanged([CallerMemberName] string name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
-    public sealed class PreviewItem
+    public sealed class PreviewItem : INotifyPropertyChanged
     {
-        public PreviewItem(string sourcePath, string destinationPath, bool isImported)
+        private bool _isSelected;
+        private string _copyError;
+
+        public PreviewItem(
+            string sourcePath,
+            string destinationPath,
+            DestinationStatus destinationStatus,
+            CopyPlanItem copyPlan)
         {
             SourcePath = sourcePath;
             DestinationPath = destinationPath;
-            IsImported = isImported;
+            DestinationStatus = destinationStatus;
+            CopyPlan = copyPlan;
+            _isSelected = copyPlan != null;
         }
+
+        public event PropertyChangedEventHandler PropertyChanged;
         public string SourcePath { get; }
         public string DestinationPath { get; }
-        public bool IsImported { get; }
+        public DestinationStatus DestinationStatus { get; }
+        public CopyPlanItem CopyPlan { get; }
+        public bool CanCopy => CopyPlan != null && !IsScanError;
         public bool IsScanError { get; private set; }
         public string ErrorMessage { get; private set; }
-        public string Status => IsScanError ? "スキャンエラー: " + ErrorMessage : IsImported ? "取込済" : "未取込";
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                var next = CanCopy && value;
+                if (_isSelected == next) return;
+                _isSelected = next;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            }
+        }
+
+        public string Status
+        {
+            get
+            {
+                if (_copyError != null) return "コピーエラー: " + _copyError;
+                if (IsScanError) return "スキャンエラー: " + ErrorMessage;
+                switch (DestinationStatus)
+                {
+                    case DestinationStatus.Imported: return "取込済";
+                    case DestinationStatus.Overwrite: return "上書き対象";
+                    case DestinationStatus.Conflict: return "競合";
+                    default: return "未取込";
+                }
+            }
+        }
+
+        public void SetCopyError(string error)
+        {
+            _copyError = error;
+            _isSelected = false;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
 
         public static PreviewItem ForScanError(string sourcePath, string message) =>
-            new PreviewItem(sourcePath, string.Empty, false) { IsScanError = true, ErrorMessage = message };
+            new PreviewItem(sourcePath, string.Empty, DestinationStatus.Conflict, null)
+            { IsScanError = true, ErrorMessage = message };
     }
 
     internal sealed class SourceScanResult
@@ -268,11 +491,13 @@ namespace PhotoImporter.App
     {
         private readonly string _root;
         public FileSystemDestinationLookup(string root) { _root = root; }
-        public bool TryGetFileSize(string relativePath, out long fileSize)
+
+        public bool TryGetFile(string relativePath, out DestinationFileSnapshot snapshot)
         {
             var path = Path.Combine(_root, relativePath);
-            if (!File.Exists(path)) { fileSize = 0; return false; }
-            fileSize = new FileInfo(path).Length;
+            if (!File.Exists(path)) { snapshot = null; return false; }
+            var info = new FileInfo(path);
+            snapshot = new DestinationFileSnapshot(info.Length, info.LastWriteTimeUtc);
             return true;
         }
     }

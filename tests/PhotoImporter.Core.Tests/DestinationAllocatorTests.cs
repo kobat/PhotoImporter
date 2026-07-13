@@ -7,82 +7,117 @@ namespace PhotoImporter.Core.Tests
 {
     public sealed class DestinationAllocatorTests
     {
+        private static readonly DateTime SourceTime = new DateTime(2026, 7, 12, 3, 0, 0, DateTimeKind.Utc);
+
         [Fact]
         public void UsesBaseCandidateWhenItDoesNotExist()
         {
-            var allocator = CreateAllocator(new Dictionary<string, long>());
-
-            var result = allocator.Allocate(Context("A.jpg", 100));
+            var result = CreateAllocator(new Dictionary<string, DestinationFileSnapshot>())
+                .Allocate(Context("A.jpg", 100), SourceTime);
 
             Assert.Equal("A.jpg", result.RelativePath);
             Assert.Equal(DestinationStatus.NotImported, result.Status);
+            Assert.Null(result.DestinationSnapshot);
         }
 
-        [Fact]
-        public void MarksSameSizeExistingCandidateAsImported()
+        [Theory]
+        [InlineData(0)]
+        [InlineData(1)]
+        public void MarksSameOrNewerDestinationAsImported(int hoursNewer)
         {
-            var allocator = CreateAllocator(new Dictionary<string, long> { ["A.jpg"] = 100 });
-
-            var result = allocator.Allocate(Context("A.jpg", 100));
-
-            Assert.Equal("A.jpg", result.RelativePath);
-            Assert.Equal(DestinationStatus.Imported, result.Status);
-        }
-
-        [Fact]
-        public void ChoosesFirstAvailableSequenceForDifferentSizeConflict()
-        {
-            var allocator = CreateAllocator(new Dictionary<string, long>
+            var files = new Dictionary<string, DestinationFileSnapshot>
             {
-                ["A.jpg"] = 90,
-                ["A_001.jpg"] = 80
-            });
+                ["A.jpg"] = Snapshot(999, SourceTime.AddHours(hoursNewer))
+            };
 
-            var result = allocator.Allocate(Context("A.jpg", 100));
+            var result = CreateAllocator(files).Allocate(Context("A.jpg", 100), SourceTime);
+
+            Assert.Equal(DestinationStatus.Imported, result.Status);
+            Assert.Equal(999, result.DestinationSnapshot.FileSize);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void SequenceUsesNextNameForOlderDestinationRegardlessOfOverwrite(bool overwrite)
+        {
+            var files = new Dictionary<string, DestinationFileSnapshot>
+            {
+                ["A.jpg"] = Snapshot(100, SourceTime.AddMinutes(-1)),
+                ["A_001.jpg"] = Snapshot(100, SourceTime.AddMinutes(-1))
+            };
+
+            var result = CreateAllocator(files, overwrite).Allocate(Context("A.jpg", 100), SourceTime);
 
             Assert.Equal("A_002.jpg", result.RelativePath);
             Assert.Equal(DestinationStatus.NotImported, result.Status);
         }
 
         [Fact]
+        public void WithoutSequenceOlderDestinationIsOverwriteWhenEnabled()
+        {
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>
+                {
+                    ["A.jpg"] = Snapshot(90, SourceTime.AddSeconds(-1))
+                }),
+                true);
+
+            var result = allocator.Allocate(Context("A.jpg", 100), SourceTime);
+
+            Assert.Equal("A.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.Overwrite, result.Status);
+        }
+
+        [Fact]
+        public void WithoutSequenceOlderDestinationIsConflictWhenOverwriteDisabled()
+        {
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>
+                {
+                    ["A.jpg"] = Snapshot(90, SourceTime.AddSeconds(-1))
+                }));
+
+            var result = allocator.Allocate(Context("A.jpg", 100), SourceTime);
+
+            Assert.Equal(DestinationStatus.Conflict, result.Status);
+        }
+
+        [Fact]
         public void DoesNotReuseAReservedPathWithinTheSameScan()
         {
-            var allocator = CreateAllocator(new Dictionary<string, long>());
+            var allocator = CreateAllocator(new Dictionary<string, DestinationFileSnapshot>());
 
-            var first = allocator.Allocate(Context("A.jpg", 100));
-            var second = allocator.Allocate(Context("A.jpg", 100));
+            var first = allocator.Allocate(Context("A.jpg", 100), SourceTime);
+            var second = allocator.Allocate(Context("A.jpg", 100), SourceTime);
 
             Assert.Equal("A.jpg", first.RelativePath);
             Assert.Equal("A_001.jpg", second.RelativePath);
         }
 
         [Fact]
-        public void SameNamedFilesInDifferentSourceDirectoriesUseDifferentDestinations()
+        public void DuplicateWithoutSequenceIsConflict()
         {
-            var template = Parse(@"{SourceRelativeDirectory}\{OriginalName}");
-            var allocator = new DestinationAllocator(template, new DictionaryLookup(new Dictionary<string, long>()));
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>()),
+                true);
 
-            var first = allocator.Allocate(new FileTemplateContext("A.jpg", new DateTime(2026, 7, 12), 100, "one"));
-            var second = allocator.Allocate(new FileTemplateContext("A.jpg", new DateTime(2026, 7, 12), 100, "two"));
+            allocator.Allocate(Context("A.jpg", 100), SourceTime);
+            var second = allocator.Allocate(Context("A.jpg", 100), SourceTime);
 
-            Assert.Equal(@"one\A.jpg", first.RelativePath);
-            Assert.Equal(@"two\A.jpg", second.RelativePath);
+            Assert.Equal(DestinationStatus.Conflict, second.Status);
         }
 
-        [Fact]
-        public void ConflictingTemplateWithoutSequenceFails()
-        {
-            var template = Parse("{FileName}{Extension}");
-            var allocator = new DestinationAllocator(template, new DictionaryLookup(
-                new Dictionary<string, long> { ["A.jpg"] = 99 }));
-
-            var exception = Assert.Throws<TemplateException>(() => allocator.Allocate(Context("A.jpg", 100)));
-
-            Assert.Equal(TemplateErrorCode.DestinationConflict, exception.Error.Code);
-        }
-
-        private static DestinationAllocator CreateAllocator(IDictionary<string, long> files) =>
-            new DestinationAllocator(Parse("{FileName}{Sequence}{Extension}"), new DictionaryLookup(files));
+        private static DestinationAllocator CreateAllocator(
+            IDictionary<string, DestinationFileSnapshot> files,
+            bool overwrite = false) =>
+            new DestinationAllocator(
+                Parse("{FileName}{Sequence}{Extension}"),
+                new DictionaryLookup(files),
+                overwrite);
 
         private static ParsedTemplate Parse(string source)
         {
@@ -92,16 +127,19 @@ namespace PhotoImporter.Core.Tests
         }
 
         private static FileTemplateContext Context(string name, long size) =>
-            new FileTemplateContext(name, new DateTime(2026, 7, 12), size);
+            new FileTemplateContext(name, SourceTime.ToLocalTime(), size);
+
+        private static DestinationFileSnapshot Snapshot(long size, DateTime timeUtc) =>
+            new DestinationFileSnapshot(size, timeUtc);
 
         private sealed class DictionaryLookup : IDestinationFileLookup
         {
-            private readonly IDictionary<string, long> _files;
+            private readonly IDictionary<string, DestinationFileSnapshot> _files;
 
-            public DictionaryLookup(IDictionary<string, long> files) => _files = files;
+            public DictionaryLookup(IDictionary<string, DestinationFileSnapshot> files) => _files = files;
 
-            public bool TryGetFileSize(string relativePath, out long fileSize) =>
-                _files.TryGetValue(relativePath, out fileSize);
+            public bool TryGetFile(string relativePath, out DestinationFileSnapshot snapshot) =>
+                _files.TryGetValue(relativePath, out snapshot);
         }
     }
 }
