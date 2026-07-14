@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -53,7 +54,6 @@ namespace PhotoImporter.Core.Metadata
 
     public sealed class PhotoMetadataReader : IPhotoMetadataReader
     {
-        private const int TagOffsetTimeOriginal = 0x9011;
         private static readonly Regex OffsetPattern = new Regex(
             @"^(?<sign>[+-])(?<hour>[0-9]{2}):(?<minute>[0-9]{2})$",
             RegexOptions.CultureInvariant);
@@ -65,31 +65,50 @@ namespace PhotoImporter.Core.Metadata
             try
             {
                 var directories = ImageMetadataReader.ReadMetadata(path).ToList();
-                var subIfd = directories.OfType<ExifSubIfdDirectory>().FirstOrDefault();
-                var ifd0 = directories.OfType<ExifIfd0Directory>().FirstOrDefault();
-
-                DateTime takenDateValue;
-                DateTime? takenDate = subIfd != null &&
-                                      subIfd.TryGetDateTime(ExifDirectoryBase.TagDateTimeOriginal, out takenDateValue)
-                    ? DateTime.SpecifyKind(takenDateValue, DateTimeKind.Unspecified)
-                    : (DateTime?)null;
-
-                var offsetText = subIfd?.GetString(TagOffsetTimeOriginal);
-                TimeSpan? offset;
-                var offsetState = ParseOffset(offsetText, out offset);
-
-                return new PhotoMetadata(
-                    takenDate,
-                    offset,
-                    offsetState,
-                    Clean(ifd0?.GetString(ExifDirectoryBase.TagMake)),
-                    Clean(ifd0?.GetString(ExifDirectoryBase.TagModel)),
-                    Clean(subIfd?.GetString(ExifDirectoryBase.TagLensModel)));
+                return Extract(directories);
             }
             catch (ImageProcessingException)
             {
                 return PhotoMetadata.Empty;
             }
+        }
+
+        internal static PhotoMetadata Extract(IEnumerable<MetadataExtractor.Directory> directories)
+        {
+            if (directories == null) throw new ArgumentNullException(nameof(directories));
+
+            var directoryList = directories.ToList();
+            var subIfds = directoryList.OfType<ExifSubIfdDirectory>().ToList();
+            var ifd0 = directoryList.OfType<ExifIfd0Directory>().FirstOrDefault();
+
+            DateTime? takenDate = null;
+            ExifSubIfdDirectory takenDateSubIfd = null;
+            foreach (var subIfd in subIfds)
+            {
+                DateTime takenDateValue;
+                if (!subIfd.TryGetDateTime(ExifDirectoryBase.TagDateTimeOriginal, out takenDateValue))
+                    continue;
+
+                takenDate = DateTime.SpecifyKind(takenDateValue, DateTimeKind.Unspecified);
+                takenDateSubIfd = subIfd;
+                break;
+            }
+
+            var offsetText = takenDateSubIfd?.GetString(ExifDirectoryBase.TagTimeZoneOriginal);
+            TimeSpan? offset;
+            var offsetState = ParseOffset(offsetText, out offset);
+
+            var lens = subIfds
+                .Select(subIfd => Clean(subIfd.GetString(ExifDirectoryBase.TagLensModel)))
+                .FirstOrDefault(value => value != null);
+
+            return new PhotoMetadata(
+                takenDate,
+                offset,
+                offsetState,
+                Clean(ifd0?.GetString(ExifDirectoryBase.TagMake)),
+                Clean(ifd0?.GetString(ExifDirectoryBase.TagModel)),
+                lens);
         }
 
         private static TakenDateOffsetState ParseOffset(string value, out TimeSpan? offset)
