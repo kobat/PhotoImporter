@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace PhotoImporter.Core.Templates
 {
@@ -41,16 +42,19 @@ namespace PhotoImporter.Core.Templates
         internal DestinationAllocation(
             string relativePath,
             DestinationStatus status,
-            DestinationFileSnapshot destinationSnapshot)
+            DestinationFileSnapshot destinationSnapshot,
+            IList<TemplateWarningCode> warnings)
         {
             RelativePath = relativePath;
             Status = status;
             DestinationSnapshot = destinationSnapshot;
+            Warnings = new ReadOnlyCollection<TemplateWarningCode>(warnings ?? new List<TemplateWarningCode>());
         }
 
         public string RelativePath { get; }
         public DestinationStatus Status { get; }
         public DestinationFileSnapshot DestinationSnapshot { get; }
+        public IReadOnlyList<TemplateWarningCode> Warnings { get; }
     }
 
     public sealed class DestinationAllocator
@@ -76,35 +80,40 @@ namespace PhotoImporter.Core.Templates
             if (sourceLastWriteTimeUtc.Kind != DateTimeKind.Utc)
                 throw new ArgumentException("The timestamp must be UTC.", nameof(sourceLastWriteTimeUtc));
 
-            var basicCandidate = TemplateEvaluator.Evaluate(_template, context);
-            var basic = CheckCandidate(basicCandidate, sourceLastWriteTimeUtc);
+            var basicEvaluation = TemplateEvaluator.EvaluateDetailed(_template, context);
+            var basicCandidate = basicEvaluation.RelativePath;
+            var basic = CheckCandidate(basicCandidate, sourceLastWriteTimeUtc, basicEvaluation.Warnings);
             if (basic != null) return basic;
 
             if (!_template.HasSequence)
-                return ReserveConflict(basicCandidate);
+                return ReserveConflict(basicCandidate, basicEvaluation.Warnings);
 
             var width = _template.SequenceWidth.Value;
             var maximum = (int)Math.Min(int.MaxValue, Math.Pow(10, width) - 1);
             for (var sequence = 1; sequence <= maximum; sequence++)
             {
-                var candidate = TemplateEvaluator.Evaluate(_template, context, sequence);
-                var allocation = CheckCandidate(candidate, sourceLastWriteTimeUtc);
+                var evaluation = TemplateEvaluator.EvaluateDetailed(_template, context, sequence);
+                var candidate = evaluation.RelativePath;
+                var allocation = CheckCandidate(candidate, sourceLastWriteTimeUtc, evaluation.Warnings);
                 if (allocation != null) return allocation;
             }
 
             throw new TemplateException(new TemplateError(TemplateErrorCode.SequenceExhausted, 0, _template.Source.Length));
         }
 
-        private DestinationAllocation CheckCandidate(string relativePath, DateTime sourceLastWriteTimeUtc)
+        private DestinationAllocation CheckCandidate(
+            string relativePath,
+            DateTime sourceLastWriteTimeUtc,
+            IReadOnlyList<TemplateWarningCode> warnings)
         {
             if (_reserved.Contains(relativePath)) return null;
 
             DestinationFileSnapshot destination;
             if (!_lookup.TryGetFile(relativePath, out destination))
-                return Reserve(relativePath, DestinationStatus.NotImported, null);
+                return Reserve(relativePath, DestinationStatus.NotImported, null, warnings);
 
             if (sourceLastWriteTimeUtc <= destination.LastWriteTimeUtc)
-                return Reserve(relativePath, DestinationStatus.Imported, destination);
+                return Reserve(relativePath, DestinationStatus.Imported, destination, warnings);
 
             if (_template.HasSequence)
                 return null;
@@ -112,23 +121,25 @@ namespace PhotoImporter.Core.Templates
             return Reserve(
                 relativePath,
                 _overwriteExisting ? DestinationStatus.Overwrite : DestinationStatus.Conflict,
-                destination);
+                destination,
+                warnings);
         }
 
-        private DestinationAllocation ReserveConflict(string relativePath)
+        private DestinationAllocation ReserveConflict(string relativePath, IReadOnlyList<TemplateWarningCode> warnings)
         {
             DestinationFileSnapshot destination;
             _lookup.TryGetFile(relativePath, out destination);
-            return Reserve(relativePath, DestinationStatus.Conflict, destination);
+            return Reserve(relativePath, DestinationStatus.Conflict, destination, warnings);
         }
 
         private DestinationAllocation Reserve(
             string relativePath,
             DestinationStatus status,
-            DestinationFileSnapshot destination)
+            DestinationFileSnapshot destination,
+            IReadOnlyList<TemplateWarningCode> warnings)
         {
             _reserved.Add(relativePath);
-            return new DestinationAllocation(relativePath, status, destination);
+            return new DestinationAllocation(relativePath, status, destination, new List<TemplateWarningCode>(warnings));
         }
     }
 }

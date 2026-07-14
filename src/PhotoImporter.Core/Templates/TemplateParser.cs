@@ -123,9 +123,12 @@ namespace PhotoImporter.Core.Templates
             error = null;
             if (token == TemplateTokenKind.TakenDateInTimeZone)
             {
-                if (string.IsNullOrEmpty(format))
+                TemplateTimeZone zone;
+                string dateFormat;
+                TemplateErrorCode errorCode;
+                if (!TemplateTimeZone.TryParseFormat(format, out zone, out dateFormat, out errorCode))
                 {
-                    error = new TemplateError(TemplateErrorCode.TimeZoneArgumentMissing, position, length, token.ToString());
+                    error = new TemplateError(errorCode, position, length, token.ToString());
                     return false;
                 }
                 return true;

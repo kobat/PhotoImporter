@@ -1,4 +1,5 @@
 using System;
+using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 using Xunit;
 
@@ -100,6 +101,76 @@ namespace PhotoImporter.Core.Tests
                 TemplateEvaluator.Evaluate(Parse(source), Context));
 
             Assert.Equal(expected, exception.Error.Code);
+        }
+
+        [Fact]
+        public void EvaluatesExifValuesAndSanitizesMetadata()
+        {
+            var metadata = new PhotoMetadata(
+                new DateTime(2026, 7, 12, 14, 25, 30),
+                TimeSpan.FromHours(9),
+                TakenDateOffsetState.Valid,
+                "ACME/Camera",
+                "Model:1",
+                null);
+            var context = new FileTemplateContext("photo.jpg", Context.ModifiedDate, 10, "", metadata);
+
+            var path = TemplateEvaluator.Evaluate(
+                Parse(@"{TakenDate:yyyy-MM-dd}\{CameraMake}_{CameraModel}_{Lens}{Extension}"), context);
+
+            Assert.Equal(@"2026-07-12\ACME_Camera_Model_1_Unknown.jpg", path);
+        }
+
+        [Fact]
+        public void ConvertsExifInstantToFixedTimeZone()
+        {
+            var metadata = new PhotoMetadata(
+                new DateTime(2026, 7, 12, 12, 0, 0),
+                TimeSpan.FromHours(-5),
+                TakenDateOffsetState.Valid,
+                null, null, null);
+            var context = new FileTemplateContext("photo.jpg", Context.ModifiedDate, 10, "", metadata);
+
+            var result = TemplateEvaluator.EvaluateDetailed(
+                Parse("{TakenDateInTimeZone:UTC+9|yyyy-MM-dd_HH-mm}"), context);
+
+            Assert.Equal("2026-07-13_02-00", result.RelativePath);
+            Assert.Empty(result.Warnings);
+        }
+
+        [Fact]
+        public void KeepsWallClockAndWarnsWhenExifOffsetIsMissing()
+        {
+            var metadata = new PhotoMetadata(
+                new DateTime(2026, 7, 12, 12, 0, 0),
+                null,
+                TakenDateOffsetState.Missing,
+                null, null, null);
+            var context = new FileTemplateContext("photo.jpg", Context.ModifiedDate, 10, "", metadata);
+
+            var result = TemplateEvaluator.EvaluateDetailed(
+                Parse("{TakenDateInTimeZone:JST|yyyy-MM-dd_HH-mm}"), context);
+
+            Assert.Equal("2026-07-12_12-00", result.RelativePath);
+            Assert.Equal(new[] { TemplateWarningCode.TakenDateOffsetMissing }, result.Warnings);
+        }
+
+        [Fact]
+        public void FallsBackToUtcModifiedDateForSpecifiedTimeZone()
+        {
+            var context = new FileTemplateContext(
+                "photo.jpg",
+                new DateTime(2026, 7, 12, 0, 0, 0),
+                10,
+                "",
+                PhotoMetadata.Empty,
+                new DateTime(2026, 7, 12, 0, 0, 0, DateTimeKind.Utc));
+
+            var result = TemplateEvaluator.EvaluateDetailed(
+                Parse("{TakenDateInTimeZone:UTC+9|yyyy-MM-dd_HH-mm}"), context);
+
+            Assert.Equal("2026-07-12_09-00", result.RelativePath);
+            Assert.Equal(new[] { TemplateWarningCode.TakenDateFallbackToModifiedDate }, result.Warnings);
         }
 
         private static ParsedTemplate Parse(string source)

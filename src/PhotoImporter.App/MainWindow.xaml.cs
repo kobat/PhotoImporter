@@ -1,4 +1,5 @@
 using PhotoImporter.Core.Copying;
+using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 using System;
 using System.Collections.Generic;
@@ -110,9 +111,6 @@ namespace PhotoImporter.App
                     ShowTemplateError(parseResult.Error);
                     return false;
                 }
-                if (parseResult.Template.RequiresExif)
-                    throw new NotSupportedException("Exifトークンは、次の開発段階で対応します。現在はファイル名・更新日時・サイズのトークンを使用してください。");
-
                 var overwrite = OverwriteExisting;
                 var rows = await Task.Run(() => BuildPreview(sourceRoot, destinationRoot, parseResult.Template, overwrite));
                 foreach (var row in rows)
@@ -226,6 +224,7 @@ namespace PhotoImporter.App
                 template,
                 new FileSystemDestinationLookup(destinationRoot),
                 overwriteExisting);
+            IPhotoMetadataReader metadataReader = template.RequiresExif ? new PhotoMetadataReader() : null;
             var scan = EnumerateSourceFiles(sourceRoot);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
@@ -238,8 +237,15 @@ namespace PhotoImporter.App
                     var info = new FileInfo(path);
                     var sourcePath = MakeRelative(sourceRoot, path);
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+                    var metadata = metadataReader == null ? PhotoMetadata.Empty : metadataReader.Read(info.FullName);
                     var allocation = allocator.Allocate(
-                        new FileTemplateContext(info.Name, info.LastWriteTime, info.Length, relativeDirectory),
+                        new FileTemplateContext(
+                            info.Name,
+                            info.LastWriteTime,
+                            info.Length,
+                            relativeDirectory,
+                            metadata,
+                            info.LastWriteTimeUtc),
                         info.LastWriteTimeUtc);
                     var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
                     var plan = allocation.Status == DestinationStatus.NotImported ||
@@ -252,7 +258,7 @@ namespace PhotoImporter.App
                             allocation.DestinationSnapshot,
                             allocation.Status == DestinationStatus.Overwrite)
                         : null;
-                    result.Add(new PreviewItem(sourcePath, allocation.RelativePath, allocation.Status, plan));
+                    result.Add(new PreviewItem(sourcePath, allocation.RelativePath, allocation.Status, plan, allocation.Warnings));
                 }
                 catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
@@ -416,12 +422,14 @@ namespace PhotoImporter.App
             string sourcePath,
             string destinationPath,
             DestinationStatus destinationStatus,
-            CopyPlanItem copyPlan)
+            CopyPlanItem copyPlan,
+            IReadOnlyList<TemplateWarningCode> warnings = null)
         {
             SourcePath = sourcePath;
             DestinationPath = destinationPath;
             DestinationStatus = destinationStatus;
             CopyPlan = copyPlan;
+            Warnings = warnings ?? new TemplateWarningCode[0];
             _isSelected = copyPlan != null;
         }
 
@@ -430,6 +438,7 @@ namespace PhotoImporter.App
         public string DestinationPath { get; }
         public DestinationStatus DestinationStatus { get; }
         public CopyPlanItem CopyPlan { get; }
+        public IReadOnlyList<TemplateWarningCode> Warnings { get; }
         public bool CanCopy => CopyPlan != null && !IsScanError;
         public bool IsScanError { get; private set; }
         public string ErrorMessage { get; private set; }
@@ -451,13 +460,19 @@ namespace PhotoImporter.App
             {
                 if (_copyError != null) return "コピーエラー: " + _copyError;
                 if (IsScanError) return "スキャンエラー: " + ErrorMessage;
+                string status;
                 switch (DestinationStatus)
                 {
-                    case DestinationStatus.Imported: return "取込済";
-                    case DestinationStatus.Overwrite: return "上書き対象";
-                    case DestinationStatus.Conflict: return "競合";
-                    default: return "未取込";
+                    case DestinationStatus.Imported: status = "取込済"; break;
+                    case DestinationStatus.Overwrite: status = "上書き対象"; break;
+                    case DestinationStatus.Conflict: status = "競合"; break;
+                    default: status = "未取込"; break;
                 }
+                if (Warnings.Contains(TemplateWarningCode.TakenDateFallbackToModifiedDate))
+                    status += "（撮影日時なし: 更新日時を使用）";
+                else if (Warnings.Contains(TemplateWarningCode.TakenDateOffsetMissing))
+                    status += "（Exif時差なし）";
+                return status;
             }
         }
 

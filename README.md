@@ -2,7 +2,7 @@
 
 Windows 11向けの写真取り込みアプリです。SDカードやCFexpressカードなどのフォルダーを再帰的にスキャンし、テンプレートからコピー先をプレビューして、未取り込みのファイルをコピーします。
 
-現在はファイルシステム情報を使うテンプレートに対応しています。Exifトークン、設定保存、多言語化、状態フィルター、単一exe配布は未実装です。
+ファイルシステム情報とExif情報を使うテンプレートに対応しています。Exifキャッシュ、設定保存、多言語化、状態フィルター、単一exe配布は未実装です。
 
 ## 必要な環境
 
@@ -33,7 +33,7 @@ dotnet build .\PhotoImporter.sln
 dotnet test .\PhotoImporter.sln
 ```
 
-2026-07-14時点では、49件のCore単体テストがすべて成功しています。
+2026-07-14時点では、56件のCore単体テストがすべて成功しています。
 
 ## 基本的な使い方
 
@@ -62,6 +62,17 @@ dotnet test .\PhotoImporter.sln
 - `{FileSize}`
 - `{Sequence}`
 
+Exif系のトークン:
+
+- `{TakenDate}`
+- `{TakenDateLocal}`
+- `{TakenDateInTimeZone:JST|yyyy-MM-dd}`
+- `{CameraMake}`
+- `{CameraModel}`
+- `{Lens}`
+
+Exifに撮影日時がない場合はファイルの更新日時を使用し、プレビューの状態欄に警告を表示します。
+
 完全な構文と競合時の規則は [TEMPLATE_SPEC.md](TEMPLATE_SPEC.md) を参照してください。設計と実装ロードマップは [DESIGN.md](DESIGN.md) にあります。
 
 ## コピーの安全性
@@ -77,7 +88,7 @@ dotnet test .\PhotoImporter.sln
 
 ## 現在の制限
 
-- `{TakenDate}` などのExif系トークンはパーサーでは認識されますが、値の読み取りは未実装です。
+- Exifはスキャンごとに読み取ります。Exifキャッシュと読み取り進捗は未実装です。
 - UIは現在、日本語のみです。
 - 状態による一覧フィルターは未実装です。
 - フォルダー、テンプレート、上書き設定は終了後に保存されません。

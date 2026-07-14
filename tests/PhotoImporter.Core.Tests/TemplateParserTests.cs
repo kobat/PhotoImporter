@@ -59,6 +59,9 @@ namespace PhotoImporter.Core.Tests
         [InlineData("{Sequence:10}", TemplateErrorCode.InvalidSequenceWidth)]
         [InlineData("{Sequence: 2}", TemplateErrorCode.InvalidSequenceWidth)]
         [InlineData("{TakenDateInTimeZone}", TemplateErrorCode.TimeZoneArgumentMissing)]
+        [InlineData("{TakenDateInTimeZone:XYZ}", TemplateErrorCode.InvalidTimeZoneCode)]
+        [InlineData("{TakenDateInTimeZone:UTC+15}", TemplateErrorCode.InvalidUtcOffset)]
+        [InlineData("{TakenDateInTimeZone:UTC+9|}", TemplateErrorCode.InvalidDateFormat)]
         [InlineData("folder/file.jpg", TemplateErrorCode.InvalidLiteralCharacter)]
         public void ReturnsStructuredErrors(string source, TemplateErrorCode expected)
         {

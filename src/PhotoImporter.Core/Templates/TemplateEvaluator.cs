@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using PhotoImporter.Core.Metadata;
 
 namespace PhotoImporter.Core.Templates
 {
@@ -14,7 +15,9 @@ namespace PhotoImporter.Core.Templates
             string originalName,
             DateTime modifiedDate,
             long fileSize,
-            string sourceRelativeDirectory = "")
+            string sourceRelativeDirectory = "",
+            PhotoMetadata metadata = null,
+            DateTime? modifiedDateUtc = null)
         {
             if (originalName == null) throw new ArgumentNullException(nameof(originalName));
             if (fileSize < 0) throw new ArgumentOutOfRangeException(nameof(fileSize));
@@ -23,12 +26,38 @@ namespace PhotoImporter.Core.Templates
             ModifiedDate = modifiedDate;
             FileSize = fileSize;
             SourceRelativeDirectory = sourceRelativeDirectory;
+            Metadata = metadata ?? PhotoMetadata.Empty;
+            ModifiedDateUtc = modifiedDateUtc ?? (modifiedDate.Kind == DateTimeKind.Utc
+                ? modifiedDate
+                : modifiedDate.ToUniversalTime());
+            if (ModifiedDateUtc.Kind != DateTimeKind.Utc)
+                ModifiedDateUtc = DateTime.SpecifyKind(ModifiedDateUtc, DateTimeKind.Utc);
         }
 
         public string OriginalName { get; }
         public DateTime ModifiedDate { get; }
         public long FileSize { get; }
         public string SourceRelativeDirectory { get; }
+        public PhotoMetadata Metadata { get; }
+        public DateTime ModifiedDateUtc { get; }
+    }
+
+    public enum TemplateWarningCode
+    {
+        TakenDateOffsetMissing,
+        TakenDateFallbackToModifiedDate
+    }
+
+    public sealed class TemplateEvaluation
+    {
+        internal TemplateEvaluation(string relativePath, IList<TemplateWarningCode> warnings)
+        {
+            RelativePath = relativePath;
+            Warnings = new System.Collections.ObjectModel.ReadOnlyCollection<TemplateWarningCode>(warnings);
+        }
+
+        public string RelativePath { get; }
+        public IReadOnlyList<TemplateWarningCode> Warnings { get; }
     }
 
     public static class TemplateEvaluator
@@ -44,17 +73,24 @@ namespace PhotoImporter.Core.Templates
             int? sequenceNumber = null,
             int maximumFullPathLength = 259,
             string destinationRoot = null)
+            => EvaluateDetailed(template, context, sequenceNumber, maximumFullPathLength, destinationRoot).RelativePath;
+
+        public static TemplateEvaluation EvaluateDetailed(
+            ParsedTemplate template,
+            FileTemplateContext context,
+            int? sequenceNumber = null,
+            int maximumFullPathLength = 259,
+            string destinationRoot = null)
         {
             if (template == null) throw new ArgumentNullException(nameof(template));
             if (context == null) throw new ArgumentNullException(nameof(context));
-            if (template.RequiresExif)
-                throw new NotSupportedException("Exif token evaluation is implemented by the metadata stage.");
             if (sequenceNumber.HasValue && !template.HasSequence)
                 throw new ArgumentException("The template has no Sequence token.", nameof(sequenceNumber));
 
             var extension = Path.GetExtension(context.OriginalName);
             var fileName = Path.GetFileNameWithoutExtension(context.OriginalName);
             var output = new StringBuilder();
+            var warnings = new List<TemplateWarningCode>();
             var skipLeadingSeparator = false;
 
             for (var partIndex = 0; partIndex < template.Parts.Count; partIndex++)
@@ -108,8 +144,25 @@ namespace PhotoImporter.Core.Templates
                             output.Append(sequenceNumber.Value.ToString(new string('0', width), CultureInfo.InvariantCulture));
                         }
                         break;
-                    default:
-                        throw new NotSupportedException("Exif token evaluation is implemented by the metadata stage.");
+                    case TemplateTokenKind.TakenDate:
+                        output.Append(FormatDate(GetTakenDate(context, warnings), part.Format, part));
+                        break;
+                    case TemplateTokenKind.TakenDateLocal:
+                        output.Append(FormatDate(GetTakenDateLocal(context, warnings), part.Format, part));
+                        break;
+                    case TemplateTokenKind.TakenDateInTimeZone:
+                        string dateFormat;
+                        output.Append(FormatDate(GetTakenDateInTimeZone(context, part, warnings, out dateFormat), dateFormat, part));
+                        break;
+                    case TemplateTokenKind.CameraMake:
+                        output.Append(SanitizePathElement(context.Metadata.CameraMake));
+                        break;
+                    case TemplateTokenKind.CameraModel:
+                        output.Append(SanitizePathElement(context.Metadata.CameraModel));
+                        break;
+                    case TemplateTokenKind.Lens:
+                        output.Append(SanitizePathElement(context.Metadata.Lens));
+                        break;
                 }
             }
 
@@ -120,7 +173,78 @@ namespace PhotoImporter.Core.Templates
             {
                 throw new TemplateException(new TemplateError(TemplateErrorCode.PathTooLong, 0, template.Source.Length));
             }
-            return relativePath;
+            return new TemplateEvaluation(relativePath, warnings);
+        }
+
+        private static DateTime GetTakenDate(FileTemplateContext context, ICollection<TemplateWarningCode> warnings)
+        {
+            if (context.Metadata.TakenDate.HasValue) return context.Metadata.TakenDate.Value;
+            AddWarning(warnings, TemplateWarningCode.TakenDateFallbackToModifiedDate);
+            return context.ModifiedDate;
+        }
+
+        private static DateTime GetTakenDateLocal(FileTemplateContext context, ICollection<TemplateWarningCode> warnings)
+        {
+            if (!context.Metadata.TakenDate.HasValue)
+            {
+                AddWarning(warnings, TemplateWarningCode.TakenDateFallbackToModifiedDate);
+                return TimeZoneInfo.ConvertTimeFromUtc(context.ModifiedDateUtc, TimeZoneInfo.Local);
+            }
+            if (context.Metadata.OffsetState != TakenDateOffsetState.Valid)
+            {
+                AddWarning(warnings, TemplateWarningCode.TakenDateOffsetMissing);
+                return context.Metadata.TakenDate.Value;
+            }
+            var instant = new DateTimeOffset(context.Metadata.TakenDate.Value, context.Metadata.TakenDateOffset.Value);
+            return TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.Local).DateTime;
+        }
+
+        private static DateTime GetTakenDateInTimeZone(
+            FileTemplateContext context,
+            TemplatePart part,
+            ICollection<TemplateWarningCode> warnings,
+            out string dateFormat)
+        {
+            TemplateTimeZone zone;
+            TemplateErrorCode error;
+            if (!TemplateTimeZone.TryParseFormat(part.Format, out zone, out dateFormat, out error))
+                Throw(error, part);
+            if (!context.Metadata.TakenDate.HasValue)
+            {
+                AddWarning(warnings, TemplateWarningCode.TakenDateFallbackToModifiedDate);
+                return zone.ConvertFromUtc(context.ModifiedDateUtc);
+            }
+            if (context.Metadata.OffsetState != TakenDateOffsetState.Valid)
+            {
+                AddWarning(warnings, TemplateWarningCode.TakenDateOffsetMissing);
+                return context.Metadata.TakenDate.Value;
+            }
+            var instant = new DateTimeOffset(context.Metadata.TakenDate.Value, context.Metadata.TakenDateOffset.Value);
+            return zone.Convert(instant);
+        }
+
+        private static void AddWarning(ICollection<TemplateWarningCode> warnings, TemplateWarningCode warning)
+        {
+            if (!warnings.Contains(warning)) warnings.Add(warning);
+        }
+
+        private static string SanitizePathElement(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "Unknown";
+            var output = new StringBuilder();
+            var previousWasGeneratedUnderscore = false;
+            foreach (var character in value)
+            {
+                var invalid = character < 32 || "<>:\"/\\|?*".IndexOf(character) >= 0;
+                var next = invalid ? '_' : character;
+                if (invalid && previousWasGeneratedUnderscore) continue;
+                output.Append(next);
+                previousWasGeneratedUnderscore = invalid;
+            }
+            var sanitized = output.ToString().TrimEnd(' ', '.');
+            if (sanitized.Length == 0) sanitized = "Unknown";
+            if (ReservedDeviceName.IsMatch(sanitized)) sanitized = "_" + sanitized;
+            return sanitized;
         }
 
         private static string SelectSourceRelativeDirectory(string relativeDirectory, string depthFormat)
