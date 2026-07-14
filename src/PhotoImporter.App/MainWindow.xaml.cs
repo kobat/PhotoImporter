@@ -1,5 +1,6 @@
 using PhotoImporter.Core.Copying;
 using PhotoImporter.Core.Metadata;
+using PhotoImporter.Core.Settings;
 using PhotoImporter.Core.Templates;
 using System;
 using System.Collections.Generic;
@@ -30,6 +31,10 @@ namespace PhotoImporter.App
         private bool _isScanningExif;
         private bool _overwriteExisting;
         private bool _analyzeJpegOnlyForRawJpegPair = true;
+        private bool _useExifCache = true;
+        private string _customExifCacheRoot;
+        private readonly List<string> _previousExifCacheRoots = new List<string>();
+        private readonly PhotoImporterSettingsStore _settingsStore;
         private bool _previewIsCurrent;
         private double _progressPercent;
         private int _exifCacheHits;
@@ -38,8 +43,24 @@ namespace PhotoImporter.App
 
         public MainWindow()
         {
+            _settingsStore = new PhotoImporterSettingsStore(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PhotoImporter",
+                "settings.xml"));
+            string settingsWarning = null;
+            try
+            {
+                ApplySettings(_settingsStore.Load());
+            }
+            catch (InvalidDataException ex)
+            {
+                settingsWarning = ex.Message + " 既定値で起動しました。";
+            }
+
             InitializeComponent();
             DataContext = this;
+            Closing += MainWindow_Closing;
+            if (settingsWarning != null) SetMessage(settingsWarning, Brushes.DarkGoldenrod);
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -76,6 +97,16 @@ namespace PhotoImporter.App
             set { if (Set(ref _analyzeJpegOnlyForRawJpegPair, value)) SettingsChanged(); }
         }
 
+        public bool UseExifCache
+        {
+            get => _useExifCache;
+            set { if (Set(ref _useExifCache, value)) SettingsChanged(); }
+        }
+
+        public string ExifCacheRoot => string.IsNullOrWhiteSpace(_customExifCacheRoot)
+            ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "ExifCache"))
+            : Path.GetFullPath(_customExifCacheRoot);
+
         public string Message { get => _message; private set => Set(ref _message, value); }
         public string Summary { get => _summary; private set => Set(ref _summary, value); }
         public string ProgressText { get => _progressText; private set => Set(ref _progressText, value); }
@@ -95,6 +126,15 @@ namespace PhotoImporter.App
 
         private void SelectDestination_Click(object sender, RoutedEventArgs e) =>
             DestinationFolder = SelectFolder(DestinationFolder, "コピー先フォルダーを選択してください") ?? DestinationFolder;
+
+        private void SelectExifCacheRoot_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectFolder(ExifCacheRoot, "Exif キャッシュの保存先を選択してください");
+            if (selected != null) ChangeExifCacheRoot(Path.GetFullPath(selected), false);
+        }
+
+        private void ResetExifCacheRoot_Click(object sender, RoutedEventArgs e) =>
+            ChangeExifCacheRoot(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "ExifCache")), true);
 
         private async void Scan_Click(object sender, RoutedEventArgs e)
         {
@@ -126,6 +166,8 @@ namespace PhotoImporter.App
                 var rawJpegAnalysisMode = AnalyzeJpegOnlyForRawJpegPair
                     ? RawJpegAnalysisMode.JpegOnlyForPair
                     : RawJpegAnalysisMode.AnalyzeBoth;
+                var useExifCache = UseExifCache;
+                var exifCacheRoot = ExifCacheRoot;
                 IProgress<PhotoMetadataScanProgress> exifProgress = null;
                 if (parseResult.Template.RequiresExif)
                 {
@@ -149,6 +191,8 @@ namespace PhotoImporter.App
                     parseResult.Template,
                     overwrite,
                     rawJpegAnalysisMode,
+                    useExifCache,
+                    exifCacheRoot,
                     exifProgress,
                     cancellationToken), cancellationToken);
                 foreach (var row in preview.Items)
@@ -285,6 +329,8 @@ namespace PhotoImporter.App
             ParsedTemplate template,
             bool overwriteExisting,
             RawJpegAnalysisMode rawJpegAnalysisMode,
+            bool useExifCache,
+            string exifCacheRoot,
             IProgress<PhotoMetadataScanProgress> exifProgress = null,
             CancellationToken cancellationToken = default(CancellationToken))
         {
@@ -309,15 +355,15 @@ namespace PhotoImporter.App
                 analysisPlan = RawJpegAnalysisPlan.Create(files, rawJpegAnalysisMode);
                 cancellationToken.ThrowIfCancellationRequested();
                 ExifCacheStore cacheStore = null;
-                var cacheRoot = Path.Combine(AppContext.BaseDirectory, "ExifCache");
-                if (IsSameOrUnder(cacheRoot, sourceRoot) || IsSameOrUnder(sourceRoot, cacheRoot) ||
-                    IsSameOrUnder(cacheRoot, destinationRoot) || IsSameOrUnder(destinationRoot, cacheRoot))
+                if (useExifCache &&
+                    (IsSameOrUnder(exifCacheRoot, sourceRoot) || IsSameOrUnder(sourceRoot, exifCacheRoot) ||
+                     IsSameOrUnder(exifCacheRoot, destinationRoot) || IsSameOrUnder(destinationRoot, exifCacheRoot)))
                 {
                     warnings.Add(string.Format(
                         "Exif キャッシュの保存先 ({0}) がコピー元またはコピー先と重なるため、キャッシュなしで続行しました。",
-                        cacheRoot));
+                        exifCacheRoot));
                 }
-                else cacheStore = new ExifCacheStore(cacheRoot);
+                else if (useExifCache) cacheStore = new ExifCacheStore(exifCacheRoot);
 
                 VolumeInfo volume = null;
                 if (cacheStore != null)
@@ -448,6 +494,123 @@ namespace PhotoImporter.App
             _previewIsCurrent = false;
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
+        }
+
+        private void ChangeExifCacheRoot(string newRoot, bool useDefault)
+        {
+            var oldRoot = ExifCacheRoot;
+            var normalizedNewRoot = Path.GetFullPath(newRoot);
+            if (string.Equals(oldRoot, normalizedNewRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                if (useDefault && !string.IsNullOrWhiteSpace(_customExifCacheRoot))
+                {
+                    _customExifCacheRoot = null;
+                    OnPropertyChanged(nameof(ExifCacheRoot));
+                    SettingsChanged();
+                    SetMessage("Exif キャッシュの保存先を既定値へ戻しました。", Brushes.DimGray);
+                }
+                return;
+            }
+
+            try
+            {
+                VerifyDirectoryWritable(normalizedNewRoot);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                       ex is ArgumentException || ex is NotSupportedException)
+            {
+                SetMessage(string.Format(
+                    "Exif キャッシュの保存先を使用できません ({0}): {1}", normalizedNewRoot, ex.Message),
+                    Brushes.Firebrick);
+                return;
+            }
+
+            var confirmation = MessageBox.Show(
+                this,
+                "Exif キャッシュの保存先を変更します。\n\n" +
+                "現在: " + oldRoot + "\n" +
+                "変更後: " + normalizedNewRoot + "\n\n" +
+                "以前の保存先にあるキャッシュは残り、通常のスキャンでは使われなくなります。",
+                "Exif キャッシュの保存先を変更",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Information);
+            if (confirmation != MessageBoxResult.OK) return;
+
+            RememberPreviousCacheRoot(oldRoot);
+            _previousExifCacheRoots.RemoveAll(
+                path => string.Equals(path, normalizedNewRoot, StringComparison.OrdinalIgnoreCase));
+            _customExifCacheRoot = useDefault ? null : normalizedNewRoot;
+            OnPropertyChanged(nameof(ExifCacheRoot));
+            SettingsChanged();
+            SetMessage("Exif キャッシュの保存先を変更しました。", Brushes.DimGray);
+        }
+
+        private void RememberPreviousCacheRoot(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) ||
+                _previousExifCacheRoots.Any(item => string.Equals(item, path, StringComparison.OrdinalIgnoreCase))) return;
+            _previousExifCacheRoots.Add(Path.GetFullPath(path));
+        }
+
+        private static void VerifyDirectoryWritable(string path)
+        {
+            Directory.CreateDirectory(path);
+            var probe = Path.Combine(path, ".PhotoImporter_write_test_" + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.WriteThrough)) { }
+            }
+            finally
+            {
+                if (File.Exists(probe)) File.Delete(probe);
+            }
+        }
+
+        private void ApplySettings(PhotoImporterSettings settings)
+        {
+            _sourceFolder = settings.SourceFolder;
+            _destinationFolder = settings.DestinationFolder;
+            _templateText = string.IsNullOrWhiteSpace(settings.TemplateText)
+                ? PhotoImporterSettings.DefaultTemplate
+                : settings.TemplateText;
+            _overwriteExisting = settings.OverwriteExisting;
+            _analyzeJpegOnlyForRawJpegPair = settings.AnalyzeJpegOnlyForRawJpegPair;
+            _useExifCache = settings.UseExifCache;
+            _customExifCacheRoot = settings.CustomExifCacheRoot;
+            _previousExifCacheRoots.Clear();
+            _previousExifCacheRoots.AddRange(settings.PreviousExifCacheRoots);
+            _previousExifCacheRoots.RemoveAll(
+                path => string.Equals(path, ExifCacheRoot, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void MainWindow_Closing(object sender, CancelEventArgs e)
+        {
+            var settings = new PhotoImporterSettings
+            {
+                SourceFolder = SourceFolder,
+                DestinationFolder = DestinationFolder,
+                TemplateText = TemplateText,
+                OverwriteExisting = OverwriteExisting,
+                AnalyzeJpegOnlyForRawJpegPair = AnalyzeJpegOnlyForRawJpegPair,
+                UseExifCache = UseExifCache,
+                CustomExifCacheRoot = _customExifCacheRoot
+            };
+            foreach (var path in _previousExifCacheRoots) settings.PreviousExifCacheRoots.Add(path);
+
+            try
+            {
+                _settingsStore.Save(settings);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                       ex is InvalidOperationException || ex is ArgumentException)
+            {
+                MessageBox.Show(
+                    this,
+                    "設定を保存できませんでした。\n" + _settingsStore.SettingsPath + "\n\n" + ex.Message,
+                    "Photo Importer",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
         }
 
         private void SetBusy(bool busy, bool copying)
