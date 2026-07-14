@@ -34,7 +34,13 @@ namespace PhotoImporter.Core.Tests
                 session.Put(unsupportedKey, PhotoMetadataReadResult.Unsupported(), Utc(2026, 7, 14));
             }
 
-            Assert.True(File.Exists(Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.json")));
+            var entriesPath = Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.tsv");
+            Assert.True(File.Exists(entriesPath));
+            var tsv = File.ReadAllText(entriesPath);
+            Assert.Contains("# PhotoImporter Exif Cache\tSchemaVersion=2\tExtractionVersion=1", tsv);
+            Assert.DoesNotContain("ComparisonPath", tsv);
+            Assert.Contains("2026-07-14T12:34:56.0000000", tsv);
+            Assert.Contains("\tSuccess\t", tsv);
             Assert.True(store.TryOpen(volume, out session, out warning), warning);
             using (session)
             {
@@ -67,7 +73,7 @@ namespace PhotoImporter.Core.Tests
             using (session)
                 session.Put(key, PhotoMetadataReadResult.ReadError(new IOException("removed")), Utc(2026, 7, 14));
 
-            Assert.False(File.Exists(Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.json")));
+            Assert.False(File.Exists(Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.tsv")));
         }
 
         [Fact]
@@ -77,7 +83,7 @@ namespace PhotoImporter.Core.Tests
             var store = new ExifCacheStore(Path.Combine(_root, "cache"));
             var volumeFolder = Path.Combine(store.CacheRoot, volume.SerialNumberHex);
             Directory.CreateDirectory(volumeFolder);
-            File.WriteAllText(Path.Combine(volumeFolder, "entries.json"), "{not-json");
+            File.WriteAllText(Path.Combine(volumeFolder, "entries.tsv"), "not-tsv");
             ExifCacheSession session;
             string warning;
 
@@ -98,13 +104,98 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void QuotedTsvFieldsRoundTripTabsNewLinesAndQuotes()
+        {
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var key = CreateKey(volume, "quoted.jpg", 10);
+            var make = "Camera\tMaker";
+            var model = "Line 1\r\nLine \"2\"";
+            ExifCacheSession session;
+            string warning;
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+                session.Put(key, PhotoMetadataReadResult.Success(new PhotoMetadata(
+                    new DateTime(2026, 7, 14, 12, 34, 56, 789),
+                    TimeSpan.FromTicks(324000000001),
+                    TakenDateOffsetState.Valid,
+                    make, model, "Lens")), Utc(2026, 7, 14));
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+            {
+                PhotoMetadataReadResult result;
+                Assert.True(session.TryGet(key, Utc(2026, 7, 14), out result));
+                Assert.Equal(make, result.Metadata.CameraMake);
+                Assert.Equal(model, result.Metadata.CameraModel);
+                Assert.Equal(TimeSpan.FromTicks(324000000001), result.Metadata.TakenDateOffset);
+            }
+        }
+
+        [Fact]
+        public void InvalidEntryRowIsSkippedWithoutDiscardingValidRows()
+        {
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var key = CreateKey(volume, "valid.jpg", 10);
+            ExifCacheSession session;
+            string warning;
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+                session.Put(key, PhotoMetadataReadResult.NoMetadata(), Utc(2026, 7, 14));
+
+            var entriesPath = Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.tsv");
+            File.AppendAllText(entriesPath,
+                "broken.jpg\tnot-a-size\t2026-07-14T00:00:00.0000000Z\t2026-07-14\tNoMetadata\t\t\tMissing\t\t\t\r\n");
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+            {
+                Assert.False(session.RecoveredFromInvalidFile);
+                Assert.Equal(1, session.Count);
+            }
+        }
+
+        [Fact]
+        public void LegacyJsonIsMigratedAfterSuccessfulOpen()
+        {
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var volumeFolder = Path.Combine(store.CacheRoot, volume.SerialNumberHex);
+            var legacyPath = Path.Combine(volumeFolder, "entries.json");
+            Directory.CreateDirectory(volumeFolder);
+            File.WriteAllText(legacyPath, string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{{\"SchemaVersion\":1,\"ExtractionVersion\":1,\"Entries\":[{{\"RelativePath\":\"legacy.jpg\",\"ComparisonPath\":\"LEGACY.JPG\",\"FileSize\":10,\"LastWriteTimeUtcTicks\":{0},\"LastUsedUtcDateTicks\":{1},\"Status\":1,\"OffsetState\":0}}]}}",
+                Utc(2026, 7, 14).Ticks,
+                Utc(2026, 7, 14).Ticks));
+            ExifCacheSession session;
+            string warning;
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+            {
+                Assert.False(session.RecoveredFromInvalidFile);
+                Assert.Equal(1, session.Count);
+                PhotoMetadataReadResult result;
+                Assert.True(session.TryGet(CreateKey(volume, "legacy.jpg", 10), Utc(2026, 7, 14), out result));
+                Assert.Equal(PhotoMetadataReadStatus.NoMetadata, result.Status);
+            }
+
+            Assert.True(File.Exists(Path.Combine(volumeFolder, "entries.tsv")));
+            Assert.False(File.Exists(legacyPath));
+        }
+
+        [Fact]
         public void RemovesStalePartialFilesAfterTakingLock()
         {
             var volume = CreateVolume();
             var store = new ExifCacheStore(Path.Combine(_root, "cache"));
             var volumeFolder = Path.Combine(store.CacheRoot, volume.SerialNumberHex);
             Directory.CreateDirectory(volumeFolder);
-            var partial = Path.Combine(volumeFolder, "entries.json.123.deadbeef.partial");
+            var partial = Path.Combine(volumeFolder, "entries.tsv.123.deadbeef.partial");
             File.WriteAllText(partial, "incomplete");
             ExifCacheSession session;
             string warning;

@@ -66,7 +66,7 @@ namespace PhotoImporter.Core.Tests
 
             Assert.Equal(PhotoMetadataReadStatus.ReadError, result.Results[photo].Status);
             Assert.Contains("変更", result.Results[photo].Error.Message);
-            Assert.False(File.Exists(Path.Combine(store.CacheRoot, CreateVolume().SerialNumberHex, "entries.json")));
+            Assert.False(File.Exists(Path.Combine(store.CacheRoot, CreateVolume().SerialNumberHex, "entries.tsv")));
         }
 
         [Fact]
@@ -75,7 +75,7 @@ namespace PhotoImporter.Core.Tests
             var photo = CreateFile("photo.jpg", "data");
             var volume = CreateVolume();
             var store = new ExifCacheStore(Path.Combine(_root, "cache"));
-            var entriesPath = Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.json");
+            var entriesPath = Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.tsv");
             var reader = new StubReader(_ =>
             {
                 Directory.CreateDirectory(entriesPath);

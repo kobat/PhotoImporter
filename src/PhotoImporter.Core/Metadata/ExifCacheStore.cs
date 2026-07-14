@@ -13,8 +13,11 @@ namespace PhotoImporter.Core.Metadata
 {
     public sealed class ExifCacheStore
     {
-        public const int EntriesSchemaVersion = 1;
+        public const int EntriesSchemaVersion = 2;
         public const int ExtractionVersion = 1;
+        internal const int LegacyEntriesSchemaVersion = 1;
+        internal const string EntriesFileName = "entries.tsv";
+        internal const string LegacyEntriesFileName = "entries.json";
         private readonly string _cacheRoot;
         private readonly TimeSpan _lockTimeout;
 
@@ -100,21 +103,26 @@ namespace PhotoImporter.Core.Metadata
 
         private static void CleanupPartialFiles(string volumeFolder)
         {
-            foreach (var path in Directory.EnumerateFiles(volumeFolder, "entries.json.*.partial"))
+            foreach (var pattern in new[] { "entries.tsv.*.partial", "entries.json.*.partial" })
             {
-                try { File.Delete(path); }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+                foreach (var path in Directory.EnumerateFiles(volumeFolder, pattern))
+                {
+                    try { File.Delete(path); }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+                }
             }
         }
 
         internal static bool IsCacheFailure(Exception ex) =>
             ex is IOException || ex is UnauthorizedAccessException ||
-            ex is SerializationException || ex is CryptographicException;
+            ex is SerializationException || ex is CryptographicException ||
+            ex is DecoderFallbackException;
     }
 
     public sealed class ExifCacheSession : IDisposable
     {
         private readonly string _entriesPath;
+        private readonly string _legacyEntriesPath;
         private readonly Mutex _mutex;
         private readonly Dictionary<CacheIdentity, CacheEntryData> _entries;
         private bool _dirty;
@@ -124,13 +132,15 @@ namespace PhotoImporter.Core.Metadata
             string volumeFolder,
             Mutex mutex,
             Dictionary<CacheIdentity, CacheEntryData> entries,
-            bool recoveredFromInvalidFile)
+            bool recoveredFromInvalidFile,
+            bool needsSave)
         {
-            _entriesPath = Path.Combine(volumeFolder, "entries.json");
+            _entriesPath = Path.Combine(volumeFolder, ExifCacheStore.EntriesFileName);
+            _legacyEntriesPath = Path.Combine(volumeFolder, ExifCacheStore.LegacyEntriesFileName);
             _mutex = mutex;
             _entries = entries;
             RecoveredFromInvalidFile = recoveredFromInvalidFile;
-            _dirty = recoveredFromInvalidFile;
+            _dirty = needsSave;
         }
 
         public bool RecoveredFromInvalidFile { get; }
@@ -176,16 +186,12 @@ namespace PhotoImporter.Core.Metadata
             EnsureUsable();
             if (!_dirty) return;
 
-            var document = new EntriesDocument
-            {
-                SchemaVersion = ExifCacheStore.EntriesSchemaVersion,
-                ExtractionVersion = ExifCacheStore.ExtractionVersion,
-                Entries = _entries.Values.OrderBy(entry => entry.ComparisonPath, StringComparer.Ordinal)
-                    .ThenBy(entry => entry.FileSize)
-                    .ThenBy(entry => entry.LastWriteTimeUtcTicks)
-                    .ToList()
-            };
-            WriteAtomically(_entriesPath, document);
+            var entries = _entries.Values.OrderBy(entry => entry.ComparisonPath, StringComparer.Ordinal)
+                .ThenBy(entry => entry.FileSize)
+                .ThenBy(entry => entry.LastWriteTimeUtcTicks)
+                .ToList();
+            WriteAtomically(_entriesPath, entries);
+            if (File.Exists(_legacyEntriesPath)) File.Delete(_legacyEntriesPath);
             _dirty = false;
         }
 
@@ -206,43 +212,155 @@ namespace PhotoImporter.Core.Metadata
 
         internal static ExifCacheSession Load(string volumeFolder, Mutex mutex)
         {
-            var entriesPath = Path.Combine(volumeFolder, "entries.json");
+            var entriesPath = Path.Combine(volumeFolder, ExifCacheStore.EntriesFileName);
+            var legacyEntriesPath = Path.Combine(volumeFolder, ExifCacheStore.LegacyEntriesFileName);
             var recovered = false;
+            var needsSave = false;
             var entries = new Dictionary<CacheIdentity, CacheEntryData>();
             if (File.Exists(entriesPath))
             {
                 try
                 {
-                    EntriesDocument document;
-                    using (var stream = new FileStream(entriesPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        document = (EntriesDocument)CreateSerializer().ReadObject(stream);
-                    if (document == null ||
-                        document.SchemaVersion != ExifCacheStore.EntriesSchemaVersion ||
-                        document.ExtractionVersion != ExifCacheStore.ExtractionVersion ||
-                        document.Entries == null)
-                    {
-                        recovered = true;
-                    }
-                    else
-                    {
-                        foreach (var entry in document.Entries)
-                        {
-                            if (!entry.IsValid()) continue;
-                            entries[entry.Identity] = entry;
-                        }
-                    }
+                    LoadTsv(entriesPath, entries);
                 }
-                catch (Exception ex) when (ex is SerializationException || ex is IOException ||
-                                               ex is ArgumentException || ex is FormatException)
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                               ex is ArgumentException || ex is FormatException ||
+                                               ex is DecoderFallbackException)
                 {
                     recovered = true;
+                    needsSave = true;
                     entries.Clear();
                 }
             }
-            return new ExifCacheSession(volumeFolder, mutex, entries, recovered);
+            else if (File.Exists(legacyEntriesPath))
+            {
+                try
+                {
+                    LoadLegacyJson(legacyEntriesPath, entries);
+                    needsSave = true;
+                }
+                catch (Exception ex) when (ex is SerializationException || ex is IOException ||
+                                               ex is UnauthorizedAccessException || ex is ArgumentException ||
+                                               ex is FormatException || ex is DecoderFallbackException)
+                {
+                    recovered = true;
+                    needsSave = true;
+                    entries.Clear();
+                }
+            }
+
+            if (File.Exists(entriesPath) && File.Exists(legacyEntriesPath)) needsSave = true;
+            return new ExifCacheSession(volumeFolder, mutex, entries, recovered, needsSave);
         }
 
-        private static void WriteAtomically(string destinationPath, EntriesDocument document)
+        private static readonly string[] ColumnNames =
+        {
+            "RelativePath", "FileSize", "LastWriteTimeUtc", "LastUsedUtcDate", "Status",
+            "TakenDate", "Offset", "OffsetState", "CameraMake", "CameraModel", "Lens"
+        };
+
+        private const string DocumentMarker = "# PhotoImporter Exif Cache";
+        private const string UtcDateTimeFormat = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
+        private const string UnspecifiedDateTimeFormat = "yyyy-MM-dd'T'HH:mm:ss.fffffff";
+        private const string DateFormat = "yyyy-MM-dd";
+
+        private static void LoadTsv(string path, IDictionary<CacheIdentity, CacheEntryData> entries)
+        {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var reader = new StreamReader(stream, new UTF8Encoding(false, true), true))
+            {
+                string[] record;
+                if (!TryReadTsvRecord(reader, out record) || record.Length != 3 ||
+                    record[0] != DocumentMarker ||
+                    record[1] != "SchemaVersion=" + ExifCacheStore.EntriesSchemaVersion.ToString(CultureInfo.InvariantCulture) ||
+                    record[2] != "ExtractionVersion=" + ExifCacheStore.ExtractionVersion.ToString(CultureInfo.InvariantCulture))
+                    throw new FormatException("The Exif cache header is invalid or incompatible.");
+
+                if (!TryReadTsvRecord(reader, out record) || !record.SequenceEqual(ColumnNames, StringComparer.Ordinal))
+                    throw new FormatException("The Exif cache column header is invalid.");
+
+                while (TryReadTsvRecord(reader, out record))
+                {
+                    CacheEntryData entry;
+                    if (!TryParseEntry(record, out entry) || !entry.IsValid()) continue;
+                    entries[entry.Identity] = entry;
+                }
+            }
+        }
+
+        private static void LoadLegacyJson(string path, IDictionary<CacheIdentity, CacheEntryData> entries)
+        {
+            EntriesDocument document;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                document = (EntriesDocument)CreateLegacySerializer().ReadObject(stream);
+            if (document == null ||
+                document.SchemaVersion != ExifCacheStore.LegacyEntriesSchemaVersion ||
+                document.ExtractionVersion != ExifCacheStore.ExtractionVersion ||
+                document.Entries == null)
+                throw new FormatException("The legacy Exif cache is invalid or incompatible.");
+
+            foreach (var entry in document.Entries)
+            {
+                if (entry == null || !entry.IsValid()) continue;
+                entry.ComparisonPath = entry.RelativePath.ToUpperInvariant();
+                entries[entry.Identity] = entry;
+            }
+        }
+
+        private static bool TryParseEntry(string[] fields, out CacheEntryData entry)
+        {
+            entry = null;
+            if (fields.Length != ColumnNames.Length) return false;
+
+            long fileSize;
+            DateTime lastWriteTimeUtc;
+            DateTime lastUsedUtcDate;
+            PhotoMetadataReadStatus status;
+            DateTime takenDate;
+            TimeSpan offset;
+            TakenDateOffsetState offsetState;
+            if (!long.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out fileSize) ||
+                !DateTime.TryParseExact(fields[2], UtcDateTimeFormat, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out lastWriteTimeUtc) ||
+                !DateTime.TryParseExact(fields[3], DateFormat, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out lastUsedUtcDate) ||
+                !Enum.TryParse(fields[4], false, out status) ||
+                !Enum.TryParse(fields[7], false, out offsetState)) return false;
+
+            long? takenDateTicks = null;
+            if (fields[5].Length != 0)
+            {
+                if (!DateTime.TryParseExact(fields[5], UnspecifiedDateTimeFormat, CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out takenDate)) return false;
+                takenDateTicks = DateTime.SpecifyKind(takenDate, DateTimeKind.Unspecified).Ticks;
+            }
+
+            long? offsetTicks = null;
+            if (fields[6].Length != 0)
+            {
+                if (!TimeSpan.TryParseExact(fields[6], "c", CultureInfo.InvariantCulture, out offset)) return false;
+                offsetTicks = offset.Ticks;
+            }
+
+            entry = new CacheEntryData
+            {
+                RelativePath = fields[0],
+                ComparisonPath = fields[0].ToUpperInvariant(),
+                FileSize = fileSize,
+                LastWriteTimeUtcTicks = lastWriteTimeUtc.Ticks,
+                LastUsedUtcDateTicks = lastUsedUtcDate.Date.Ticks,
+                Status = (int)status,
+                TakenDateTicks = takenDateTicks,
+                OffsetTicks = offsetTicks,
+                OffsetState = (int)offsetState,
+                CameraMake = EmptyToNull(fields[8]),
+                CameraModel = EmptyToNull(fields[9]),
+                Lens = EmptyToNull(fields[10])
+            };
+            return true;
+        }
+
+        private static void WriteAtomically(string destinationPath, IEnumerable<CacheEntryData> entries)
         {
             var temporaryPath = destinationPath + "." + System.Diagnostics.Process.GetCurrentProcess().Id +
                                 "." + Guid.NewGuid().ToString("N") + ".partial";
@@ -250,7 +368,19 @@ namespace PhotoImporter.Core.Metadata
             {
                 using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
-                    CreateSerializer().WriteObject(stream, document);
+                    using (var writer = new StreamWriter(stream, new UTF8Encoding(true), 4096, true))
+                    {
+                        writer.NewLine = "\r\n";
+                        writer.WriteLine(string.Join("\t", new[]
+                        {
+                            DocumentMarker,
+                            "SchemaVersion=" + ExifCacheStore.EntriesSchemaVersion.ToString(CultureInfo.InvariantCulture),
+                            "ExtractionVersion=" + ExifCacheStore.ExtractionVersion.ToString(CultureInfo.InvariantCulture)
+                        }));
+                        writer.WriteLine(string.Join("\t", ColumnNames));
+                        foreach (var entry in entries) WriteEntry(writer, entry);
+                        writer.Flush();
+                    }
                     stream.Flush(true);
                 }
 
@@ -266,7 +396,133 @@ namespace PhotoImporter.Core.Metadata
             }
         }
 
-        private static DataContractJsonSerializer CreateSerializer() =>
+        private static void WriteEntry(TextWriter writer, CacheEntryData entry)
+        {
+            var fields = new[]
+            {
+                entry.RelativePath,
+                entry.FileSize.ToString(CultureInfo.InvariantCulture),
+                new DateTime(entry.LastWriteTimeUtcTicks, DateTimeKind.Utc).ToString(UtcDateTimeFormat, CultureInfo.InvariantCulture),
+                new DateTime(entry.LastUsedUtcDateTicks, DateTimeKind.Utc).ToString(DateFormat, CultureInfo.InvariantCulture),
+                ((PhotoMetadataReadStatus)entry.Status).ToString(),
+                entry.TakenDateTicks.HasValue
+                    ? new DateTime(entry.TakenDateTicks.Value, DateTimeKind.Unspecified).ToString(UnspecifiedDateTimeFormat, CultureInfo.InvariantCulture)
+                    : string.Empty,
+                entry.OffsetTicks.HasValue
+                    ? TimeSpan.FromTicks(entry.OffsetTicks.Value).ToString("c", CultureInfo.InvariantCulture)
+                    : string.Empty,
+                ((TakenDateOffsetState)entry.OffsetState).ToString(),
+                entry.CameraMake ?? string.Empty,
+                entry.CameraModel ?? string.Empty,
+                entry.Lens ?? string.Empty
+            };
+            writer.WriteLine(string.Join("\t", fields.Select(EscapeTsvField)));
+        }
+
+        private static string EscapeTsvField(string value)
+        {
+            if (value.IndexOfAny(new[] { '\t', '\r', '\n', '"' }) < 0) return value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static bool TryReadTsvRecord(TextReader reader, out string[] record)
+        {
+            var fields = new List<string>();
+            var value = new StringBuilder();
+            var anyCharacters = false;
+            var atFieldStart = true;
+            var inQuotes = false;
+            var afterQuote = false;
+
+            while (true)
+            {
+                var next = reader.Read();
+                if (next < 0)
+                {
+                    if (inQuotes) throw new FormatException("The Exif cache contains an unterminated quoted field.");
+                    if (!anyCharacters && fields.Count == 0 && value.Length == 0)
+                    {
+                        record = null;
+                        return false;
+                    }
+                    fields.Add(value.ToString());
+                    record = fields.ToArray();
+                    return true;
+                }
+
+                anyCharacters = true;
+                var ch = (char)next;
+                if (inQuotes)
+                {
+                    if (ch != '"')
+                    {
+                        value.Append(ch);
+                        continue;
+                    }
+                    if (reader.Peek() == '"')
+                    {
+                        reader.Read();
+                        value.Append('"');
+                        continue;
+                    }
+                    inQuotes = false;
+                    afterQuote = true;
+                    continue;
+                }
+
+                if (afterQuote)
+                {
+                    if (ch == '\t')
+                    {
+                        fields.Add(value.ToString());
+                        value.Clear();
+                        atFieldStart = true;
+                        afterQuote = false;
+                        continue;
+                    }
+                    if (ch == '\r' || ch == '\n')
+                    {
+                        if (ch == '\r' && reader.Peek() == '\n') reader.Read();
+                        fields.Add(value.ToString());
+                        record = fields.ToArray();
+                        return true;
+                    }
+                    throw new FormatException("The Exif cache contains characters after a quoted field.");
+                }
+
+                if (atFieldStart && ch == '"')
+                {
+                    inQuotes = true;
+                    atFieldStart = false;
+                }
+                else if (ch == '"')
+                {
+                    throw new FormatException("The Exif cache contains an unexpected quote.");
+                }
+                else if (ch == '\t')
+                {
+                    fields.Add(value.ToString());
+                    value.Clear();
+                    atFieldStart = true;
+                }
+                else if (ch == '\r' || ch == '\n')
+                {
+                    if (ch == '\r' && reader.Peek() == '\n') reader.Read();
+                    fields.Add(value.ToString());
+                    record = fields.ToArray();
+                    return true;
+                }
+                else
+                {
+                    value.Append(ch);
+                    atFieldStart = false;
+                }
+            }
+        }
+
+        private static string EmptyToNull(string value) => value.Length == 0 ? null : value;
+
+        private static DataContractJsonSerializer CreateLegacySerializer() =>
             new DataContractJsonSerializer(typeof(EntriesDocument));
 
         private void EnsureUsable()
