@@ -27,6 +27,7 @@ namespace PhotoImporter.App
         private Brush _messageBrush = Brushes.DimGray;
         private bool _isBusy;
         private bool _isCopying;
+        private bool _isScanningExif;
         private bool _overwriteExisting;
         private bool _previewIsCurrent;
         private double _progressPercent;
@@ -71,7 +72,7 @@ namespace PhotoImporter.App
         public string ProgressText { get => _progressText; private set => Set(ref _progressText, value); }
         public Brush MessageBrush { get => _messageBrush; private set => Set(ref _messageBrush, value); }
         public double ProgressPercent { get => _progressPercent; private set => Set(ref _progressPercent, value); }
-        public Visibility ProgressVisibility => _isCopying ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility ProgressVisibility => _isCopying || _isScanningExif ? Visibility.Visible : Visibility.Collapsed;
         public bool CanEditSettings => !_isBusy;
         public bool CanSelectItems => !_isBusy;
         public bool CanCancel => _isCopying;
@@ -112,7 +113,22 @@ namespace PhotoImporter.App
                     return false;
                 }
                 var overwrite = OverwriteExisting;
-                var rows = await Task.Run(() => BuildPreview(sourceRoot, destinationRoot, parseResult.Template, overwrite));
+                IProgress<ExifScanProgress> exifProgress = null;
+                if (parseResult.Template.RequiresExif)
+                {
+                    _isScanningExif = true;
+                    ProgressPercent = 0;
+                    ProgressText = "Exifスキャン準備中...";
+                    OnPropertyChanged(nameof(ProgressVisibility));
+                    SetMessage("Exif情報を読み取っています...", Brushes.DimGray);
+                    exifProgress = new Progress<ExifScanProgress>(UpdateExifScanProgress);
+                }
+                var rows = await Task.Run(() => BuildPreview(
+                    sourceRoot,
+                    destinationRoot,
+                    parseResult.Template,
+                    overwrite,
+                    exifProgress));
                 foreach (var row in rows)
                 {
                     row.PropertyChanged += PreviewItem_PropertyChanged;
@@ -129,6 +145,7 @@ namespace PhotoImporter.App
             catch (Exception ex) { SetMessage(ex.Message, Brushes.Firebrick); }
             finally
             {
+                _isScanningExif = false;
                 SetBusy(false, false);
                 if (Summary == "スキャン中...") Summary = "0 件";
             }
@@ -213,11 +230,23 @@ namespace PhotoImporter.App
                 FormatBytes(progress.TotalBytes));
         }
 
+        private void UpdateExifScanProgress(ExifScanProgress progress)
+        {
+            ProgressPercent = progress.TotalFiles == 0
+                ? 100
+                : Math.Min(100, progress.CompletedFiles * 100.0 / progress.TotalFiles);
+            ProgressText = string.Format(
+                "Exifスキャン {0}/{1} 件",
+                progress.CompletedFiles,
+                progress.TotalFiles);
+        }
+
         private static List<PreviewItem> BuildPreview(
             string sourceRoot,
             string destinationRoot,
             ParsedTemplate template,
-            bool overwriteExisting)
+            bool overwriteExisting,
+            IProgress<ExifScanProgress> exifProgress = null)
         {
             var result = new List<PreviewItem>();
             var allocator = new DestinationAllocator(
@@ -229,8 +258,12 @@ namespace PhotoImporter.App
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
-            foreach (var path in scan.Files.OrderBy(
-                item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase))
+            var files = scan.Files.OrderBy(
+                item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase).ToList();
+            var completedFiles = 0;
+            exifProgress?.Report(new ExifScanProgress(0, files.Count));
+
+            foreach (var path in files)
             {
                 try
                 {
@@ -263,6 +296,11 @@ namespace PhotoImporter.App
                 catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (TemplateException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString())); }
+                finally
+                {
+                    completedFiles++;
+                    exifProgress?.Report(new ExifScanProgress(completedFiles, files.Count));
+                }
             }
             return result;
         }
@@ -336,7 +374,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(ProgressVisibility));
-            if (!copying) ProgressText = string.Empty;
+            if (!copying && !_isScanningExif) ProgressText = string.Empty;
         }
 
         private static void ValidateRoots(string sourceRoot, string destinationRoot)
@@ -500,6 +538,18 @@ namespace PhotoImporter.App
         public ScanIssue(string path, string message) { Path = path; Message = message; }
         public string Path { get; }
         public string Message { get; }
+    }
+
+    internal sealed class ExifScanProgress
+    {
+        public ExifScanProgress(int completedFiles, int totalFiles)
+        {
+            CompletedFiles = completedFiles;
+            TotalFiles = totalFiles;
+        }
+
+        public int CompletedFiles { get; }
+        public int TotalFiles { get; }
     }
 
     internal sealed class FileSystemDestinationLookup : IDestinationFileLookup
