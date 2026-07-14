@@ -173,6 +173,26 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(new[] { TemplateWarningCode.TakenDateFallbackToModifiedDate }, result.Warnings);
         }
 
+        [Fact]
+        public void ExifFallbackUsesAnalysisSourceDatesButFileTokensUseTargetValues()
+        {
+            var context = new FileTemplateContext(
+                "photo.ARW",
+                new DateTime(2026, 7, 12, 10, 0, 0),
+                200,
+                "",
+                PhotoMetadata.Empty,
+                new DateTime(2026, 7, 12, 1, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 13, 20, 0, 0),
+                new DateTime(2026, 7, 13, 11, 0, 0, DateTimeKind.Utc));
+
+            var result = TemplateEvaluator.Evaluate(
+                Parse("{FileName}_{Extension}_{FileSize}_{ModifiedDate:dd}_{TakenDate:dd}_{TakenDateInTimeZone:UTC|dd}"),
+                context);
+
+            Assert.Equal("photo_.ARW_200_12_13_13", result);
+        }
+
         private static ParsedTemplate Parse(string source)
         {
             var result = TemplateParser.Parse(source);

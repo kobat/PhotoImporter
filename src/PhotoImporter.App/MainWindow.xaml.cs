@@ -29,6 +29,7 @@ namespace PhotoImporter.App
         private bool _isCopying;
         private bool _isScanningExif;
         private bool _overwriteExisting;
+        private bool _analyzeJpegOnlyForRawJpegPair = true;
         private bool _previewIsCurrent;
         private double _progressPercent;
         private CancellationTokenSource _copyCancellation;
@@ -65,6 +66,12 @@ namespace PhotoImporter.App
         {
             get => _overwriteExisting;
             set { if (Set(ref _overwriteExisting, value)) SettingsChanged(); }
+        }
+
+        public bool AnalyzeJpegOnlyForRawJpegPair
+        {
+            get => _analyzeJpegOnlyForRawJpegPair;
+            set { if (Set(ref _analyzeJpegOnlyForRawJpegPair, value)) SettingsChanged(); }
         }
 
         public string Message { get => _message; private set => Set(ref _message, value); }
@@ -113,6 +120,9 @@ namespace PhotoImporter.App
                     return false;
                 }
                 var overwrite = OverwriteExisting;
+                var rawJpegAnalysisMode = AnalyzeJpegOnlyForRawJpegPair
+                    ? RawJpegAnalysisMode.JpegOnlyForPair
+                    : RawJpegAnalysisMode.AnalyzeBoth;
                 IProgress<ExifScanProgress> exifProgress = null;
                 if (parseResult.Template.RequiresExif)
                 {
@@ -128,6 +138,7 @@ namespace PhotoImporter.App
                     destinationRoot,
                     parseResult.Template,
                     overwrite,
+                    rawJpegAnalysisMode,
                     exifProgress));
                 foreach (var row in rows)
                 {
@@ -246,6 +257,7 @@ namespace PhotoImporter.App
             string destinationRoot,
             ParsedTemplate template,
             bool overwriteExisting,
+            RawJpegAnalysisMode rawJpegAnalysisMode,
             IProgress<ExifScanProgress> exifProgress = null)
         {
             var result = new List<PreviewItem>();
@@ -253,15 +265,33 @@ namespace PhotoImporter.App
                 template,
                 new FileSystemDestinationLookup(destinationRoot),
                 overwriteExisting);
-            IPhotoMetadataReader metadataReader = template.RequiresExif ? new PhotoMetadataReader() : null;
             var scan = EnumerateSourceFiles(sourceRoot);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
             var files = scan.Files.OrderBy(
                 item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase).ToList();
-            var completedFiles = 0;
-            exifProgress?.Report(new ExifScanProgress(0, files.Count));
+            RawJpegAnalysisPlan analysisPlan = null;
+            var metadataBySource = new Dictionary<string, PhotoMetadata>(StringComparer.OrdinalIgnoreCase);
+            var metadataErrors = new Dictionary<string, Exception>(StringComparer.OrdinalIgnoreCase);
+            if (template.RequiresExif)
+            {
+                analysisPlan = RawJpegAnalysisPlan.Create(files, rawJpegAnalysisMode);
+                var metadataReader = new PhotoMetadataReader();
+                var completedSources = 0;
+                exifProgress?.Report(new ExifScanProgress(0, analysisPlan.AnalysisSources.Count));
+                foreach (var analysisSource in analysisPlan.AnalysisSources)
+                {
+                    try { metadataBySource.Add(analysisSource, metadataReader.Read(analysisSource)); }
+                    catch (UnauthorizedAccessException ex) { metadataErrors.Add(analysisSource, ex); }
+                    catch (IOException ex) { metadataErrors.Add(analysisSource, ex); }
+                    finally
+                    {
+                        completedSources++;
+                        exifProgress?.Report(new ExifScanProgress(completedSources, analysisPlan.AnalysisSources.Count));
+                    }
+                }
+            }
 
             foreach (var path in files)
             {
@@ -270,7 +300,13 @@ namespace PhotoImporter.App
                     var info = new FileInfo(path);
                     var sourcePath = MakeRelative(sourceRoot, path);
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
-                    var metadata = metadataReader == null ? PhotoMetadata.Empty : metadataReader.Read(info.FullName);
+                    var analysisSource = analysisPlan == null ? path : analysisPlan.GetAnalysisSource(path);
+                    Exception metadataError;
+                    if (metadataErrors.TryGetValue(analysisSource, out metadataError)) throw metadataError;
+                    var metadata = analysisPlan == null ? PhotoMetadata.Empty : metadataBySource[analysisSource];
+                    var analysisSourceInfo = string.Equals(path, analysisSource, StringComparison.OrdinalIgnoreCase)
+                        ? info
+                        : new FileInfo(analysisSource);
                     var allocation = allocator.Allocate(
                         new FileTemplateContext(
                             info.Name,
@@ -278,7 +314,9 @@ namespace PhotoImporter.App
                             info.Length,
                             relativeDirectory,
                             metadata,
-                            info.LastWriteTimeUtc),
+                            info.LastWriteTimeUtc,
+                            analysisSourceInfo.LastWriteTime,
+                            analysisSourceInfo.LastWriteTimeUtc),
                         info.LastWriteTimeUtc);
                     var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
                     var plan = allocation.Status == DestinationStatus.NotImported ||
@@ -296,11 +334,6 @@ namespace PhotoImporter.App
                 catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (TemplateException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString())); }
-                finally
-                {
-                    completedFiles++;
-                    exifProgress?.Report(new ExifScanProgress(completedFiles, files.Count));
-                }
             }
             return result;
         }

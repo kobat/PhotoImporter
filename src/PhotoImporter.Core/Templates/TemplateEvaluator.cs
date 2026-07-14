@@ -17,7 +17,9 @@ namespace PhotoImporter.Core.Templates
             long fileSize,
             string sourceRelativeDirectory = "",
             PhotoMetadata metadata = null,
-            DateTime? modifiedDateUtc = null)
+            DateTime? modifiedDateUtc = null,
+            DateTime? exifSourceModifiedDate = null,
+            DateTime? exifSourceModifiedDateUtc = null)
         {
             if (originalName == null) throw new ArgumentNullException(nameof(originalName));
             if (fileSize < 0) throw new ArgumentOutOfRangeException(nameof(fileSize));
@@ -32,6 +34,10 @@ namespace PhotoImporter.Core.Templates
                 : modifiedDate.ToUniversalTime());
             if (ModifiedDateUtc.Kind != DateTimeKind.Utc)
                 ModifiedDateUtc = DateTime.SpecifyKind(ModifiedDateUtc, DateTimeKind.Utc);
+            ExifSourceModifiedDate = exifSourceModifiedDate ?? ModifiedDate;
+            ExifSourceModifiedDateUtc = exifSourceModifiedDateUtc ?? ModifiedDateUtc;
+            if (ExifSourceModifiedDateUtc.Kind != DateTimeKind.Utc)
+                ExifSourceModifiedDateUtc = DateTime.SpecifyKind(ExifSourceModifiedDateUtc, DateTimeKind.Utc);
         }
 
         public string OriginalName { get; }
@@ -40,6 +46,8 @@ namespace PhotoImporter.Core.Templates
         public string SourceRelativeDirectory { get; }
         public PhotoMetadata Metadata { get; }
         public DateTime ModifiedDateUtc { get; }
+        public DateTime ExifSourceModifiedDate { get; }
+        public DateTime ExifSourceModifiedDateUtc { get; }
     }
 
     public enum TemplateWarningCode
@@ -180,7 +188,7 @@ namespace PhotoImporter.Core.Templates
         {
             if (context.Metadata.TakenDate.HasValue) return context.Metadata.TakenDate.Value;
             AddWarning(warnings, TemplateWarningCode.TakenDateFallbackToModifiedDate);
-            return context.ModifiedDate;
+            return context.ExifSourceModifiedDate;
         }
 
         private static DateTime GetTakenDateLocal(FileTemplateContext context, ICollection<TemplateWarningCode> warnings)
@@ -188,7 +196,7 @@ namespace PhotoImporter.Core.Templates
             if (!context.Metadata.TakenDate.HasValue)
             {
                 AddWarning(warnings, TemplateWarningCode.TakenDateFallbackToModifiedDate);
-                return TimeZoneInfo.ConvertTimeFromUtc(context.ModifiedDateUtc, TimeZoneInfo.Local);
+                return TimeZoneInfo.ConvertTimeFromUtc(context.ExifSourceModifiedDateUtc, TimeZoneInfo.Local);
             }
             if (context.Metadata.OffsetState != TakenDateOffsetState.Valid)
             {
@@ -212,7 +220,7 @@ namespace PhotoImporter.Core.Templates
             if (!context.Metadata.TakenDate.HasValue)
             {
                 AddWarning(warnings, TemplateWarningCode.TakenDateFallbackToModifiedDate);
-                return zone.ConvertFromUtc(context.ModifiedDateUtc);
+                return zone.ConvertFromUtc(context.ExifSourceModifiedDateUtc);
             }
             if (context.Metadata.OffsetState != TakenDateOffsetState.Valid)
             {
