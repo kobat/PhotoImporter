@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
 using PhotoImporter.Core.Metadata;
@@ -8,6 +9,40 @@ namespace PhotoImporter.Core.Tests
 {
     public sealed class PhotoMetadataReaderTests
     {
+        [Fact]
+        public void StructuredResultsDistinguishCacheableAndTransientOutcomes()
+        {
+            var metadata = new PhotoMetadata(
+                new DateTime(2026, 7, 14),
+                null,
+                TakenDateOffsetState.Missing,
+                null,
+                null,
+                null);
+
+            Assert.Equal(PhotoMetadataReadStatus.Success, PhotoMetadataReadResult.Success(metadata).Status);
+            Assert.True(PhotoMetadataReadResult.NoMetadata().IsCacheable);
+            Assert.True(PhotoMetadataReadResult.Unsupported().IsCacheable);
+
+            var error = new IOException("read failed");
+            var result = PhotoMetadataReadResult.ReadError(error);
+            Assert.Equal(PhotoMetadataReadStatus.ReadError, result.Status);
+            Assert.Same(error, result.Error);
+            Assert.False(result.IsCacheable);
+        }
+
+        [Fact]
+        public void MissingFileReturnsStructuredReadError()
+        {
+            var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".jpg");
+
+            var result = new PhotoMetadataReader().Read(path);
+
+            Assert.Equal(PhotoMetadataReadStatus.ReadError, result.Status);
+            Assert.IsAssignableFrom<IOException>(result.Error);
+            Assert.Same(PhotoMetadata.Empty, result.Metadata);
+        }
+
         [Fact]
         public void ExtractsPhotoMetadataFromLaterSonyArwSubIfd()
         {
@@ -27,7 +62,7 @@ namespace PhotoImporter.Core.Tests
                 ExifDirectoryBase.TagLensModel,
                 "60-600mm F4.5-6.3 DG DN OS | Sports 023");
 
-            var metadata = PhotoMetadataReader.Extract(new Directory[]
+            var metadata = PhotoMetadataReader.Extract(new MetadataExtractor.Directory[]
             {
                 ifd0,
                 rawImageSubIfd,

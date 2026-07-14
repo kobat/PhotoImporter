@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using MetadataExtractor;
@@ -45,11 +46,14 @@ namespace PhotoImporter.Core.Metadata
         public string CameraMake { get; }
         public string CameraModel { get; }
         public string Lens { get; }
+
+        public bool HasValues => TakenDate.HasValue || TakenDateOffset.HasValue ||
+                                 CameraMake != null || CameraModel != null || Lens != null;
     }
 
     public interface IPhotoMetadataReader
     {
-        PhotoMetadata Read(string path);
+        PhotoMetadataReadResult Read(string path);
     }
 
     public sealed class PhotoMetadataReader : IPhotoMetadataReader
@@ -58,18 +62,25 @@ namespace PhotoImporter.Core.Metadata
             @"^(?<sign>[+-])(?<hour>[0-9]{2}):(?<minute>[0-9]{2})$",
             RegexOptions.CultureInvariant);
 
-        public PhotoMetadata Read(string path)
+        public PhotoMetadataReadResult Read(string path)
         {
             if (path == null) throw new ArgumentNullException(nameof(path));
 
             try
             {
                 var directories = ImageMetadataReader.ReadMetadata(path).ToList();
-                return Extract(directories);
+                var metadata = Extract(directories);
+                return metadata.HasValues
+                    ? PhotoMetadataReadResult.Success(metadata)
+                    : PhotoMetadataReadResult.NoMetadata();
             }
             catch (ImageProcessingException)
             {
-                return PhotoMetadata.Empty;
+                return PhotoMetadataReadResult.Unsupported();
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return PhotoMetadataReadResult.ReadError(ex);
             }
         }
 

@@ -25,14 +25,17 @@ namespace PhotoImporter.Core.Metadata
 
         private RawJpegAnalysisPlan(
             IDictionary<string, string> analysisSourceByTarget,
-            IList<string> analysisSources)
+            IList<string> analysisSources,
+            IList<string> targetPaths)
         {
             _analysisSourceByTarget = new ReadOnlyDictionary<string, string>(
                 new Dictionary<string, string>(analysisSourceByTarget, StringComparer.OrdinalIgnoreCase));
             AnalysisSources = new ReadOnlyCollection<string>(analysisSources);
+            TargetPaths = new ReadOnlyCollection<string>(targetPaths);
         }
 
         public IReadOnlyList<string> AnalysisSources { get; }
+        public IReadOnlyList<string> TargetPaths { get; }
 
         public string GetAnalysisSource(string targetPath)
         {
@@ -74,7 +77,7 @@ namespace PhotoImporter.Core.Metadata
                 var source = sourceByTarget[target];
                 if (seen.Add(source)) sources.Add(source);
             }
-            return new RawJpegAnalysisPlan(sourceByTarget, sources);
+            return new RawJpegAnalysisPlan(sourceByTarget, sources, paths);
         }
 
         private static string GetPairKey(string path)

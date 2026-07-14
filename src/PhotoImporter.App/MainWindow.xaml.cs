@@ -272,8 +272,7 @@ namespace PhotoImporter.App
             var files = scan.Files.OrderBy(
                 item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase).ToList();
             RawJpegAnalysisPlan analysisPlan = null;
-            var metadataBySource = new Dictionary<string, PhotoMetadata>(StringComparer.OrdinalIgnoreCase);
-            var metadataErrors = new Dictionary<string, Exception>(StringComparer.OrdinalIgnoreCase);
+            var metadataBySource = new Dictionary<string, PhotoMetadataReadResult>(StringComparer.OrdinalIgnoreCase);
             if (template.RequiresExif)
             {
                 analysisPlan = RawJpegAnalysisPlan.Create(files, rawJpegAnalysisMode);
@@ -282,9 +281,10 @@ namespace PhotoImporter.App
                 exifProgress?.Report(new ExifScanProgress(0, analysisPlan.AnalysisSources.Count));
                 foreach (var analysisSource in analysisPlan.AnalysisSources)
                 {
-                    try { metadataBySource.Add(analysisSource, metadataReader.Read(analysisSource)); }
-                    catch (UnauthorizedAccessException ex) { metadataErrors.Add(analysisSource, ex); }
-                    catch (IOException ex) { metadataErrors.Add(analysisSource, ex); }
+                    try
+                    {
+                        metadataBySource.Add(analysisSource, metadataReader.Read(analysisSource));
+                    }
                     finally
                     {
                         completedSources++;
@@ -301,9 +301,10 @@ namespace PhotoImporter.App
                     var sourcePath = MakeRelative(sourceRoot, path);
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
                     var analysisSource = analysisPlan == null ? path : analysisPlan.GetAnalysisSource(path);
-                    Exception metadataError;
-                    if (metadataErrors.TryGetValue(analysisSource, out metadataError)) throw metadataError;
-                    var metadata = analysisPlan == null ? PhotoMetadata.Empty : metadataBySource[analysisSource];
+                    var metadataResult = analysisPlan == null ? null : metadataBySource[analysisSource];
+                    if (metadataResult != null && metadataResult.Status == PhotoMetadataReadStatus.ReadError)
+                        throw metadataResult.Error;
+                    var metadata = metadataResult == null ? PhotoMetadata.Empty : metadataResult.Metadata;
                     var analysisSourceInfo = string.Equals(path, analysisSource, StringComparison.OrdinalIgnoreCase)
                         ? info
                         : new FileInfo(analysisSource);

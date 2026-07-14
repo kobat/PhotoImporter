@@ -33,7 +33,7 @@ dotnet build .\PhotoImporter.sln
 dotnet test .\PhotoImporter.sln
 ```
 
-2026-07-14時点では、56件のCore単体テストがすべて成功しています。
+2026-07-14時点では、75件のCore単体テストがすべて成功しています。
 
 ## 基本的な使い方
 
