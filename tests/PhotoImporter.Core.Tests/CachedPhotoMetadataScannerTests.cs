@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using PhotoImporter.Core.Metadata;
 using Xunit;
 
@@ -87,6 +88,54 @@ namespace PhotoImporter.Core.Tests
 
             Assert.Equal(PhotoMetadataReadStatus.Success, result.Results[photo].Status);
             Assert.Contains(result.Warnings, warning => warning.Contains("保存できませんでした"));
+        }
+
+        [Fact]
+        public void CancellationAfterReadCachesCompletedFilesForNextScan()
+        {
+            var firstPhoto = CreateFile("DCIM/001.jpg", "first");
+            var secondPhoto = CreateFile("DCIM/002.jpg", "second");
+            var thirdPhoto = CreateFile("DCIM/003.jpg", "third");
+            var plan = RawJpegAnalysisPlan.Create(new[] { firstPhoto, secondPhoto, thirdPhoto });
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var cancellation = new CancellationTokenSource();
+            var reads = 0;
+            var reader = new StubReader(_ =>
+            {
+                reads++;
+                if (reads == 2) cancellation.Cancel();
+                return PhotoMetadataReadResult.Success(CreateMetadata());
+            });
+            var scanner = new CachedPhotoMetadataScanner(reader);
+
+            Assert.Throws<OperationCanceledException>(() => scanner.Scan(
+                plan, volume, store, UtcNow(), null, cancellation.Token));
+
+            var resumed = scanner.Scan(plan, volume, store, UtcNow());
+
+            Assert.Equal(3, reader.ReadCount);
+            Assert.Equal(2, resumed.CacheHits);
+            Assert.Equal(3, resumed.Results.Count);
+        }
+
+        [Fact]
+        public void AlreadyCancelledScanDoesNotReadMetadata()
+        {
+            var photo = CreateFile("photo.jpg", "data");
+            var reader = new StubReader(_ => PhotoMetadataReadResult.Success(CreateMetadata()));
+            var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            Assert.Throws<OperationCanceledException>(() => new CachedPhotoMetadataScanner(reader).Scan(
+                RawJpegAnalysisPlan.Create(new[] { photo }),
+                CreateVolume(),
+                new ExifCacheStore(Path.Combine(_root, "cache")),
+                UtcNow(),
+                null,
+                cancellation.Token));
+
+            Assert.Equal(0, reader.ReadCount);
         }
 
         public void Dispose()

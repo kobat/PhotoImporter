@@ -35,9 +35,14 @@ namespace PhotoImporter.Core.Metadata
 
         public string CacheRoot => _cacheRoot;
 
-        public bool TryOpen(VolumeInfo volume, out ExifCacheSession session, out string warning)
+        public bool TryOpen(
+            VolumeInfo volume,
+            out ExifCacheSession session,
+            out string warning,
+            CancellationToken cancellationToken = default(CancellationToken))
         {
             if (volume == null) throw new ArgumentNullException(nameof(volume));
+            cancellationToken.ThrowIfCancellationRequested();
             session = null;
             warning = null;
 
@@ -48,7 +53,18 @@ namespace PhotoImporter.Core.Metadata
                 mutex = new Mutex(false, CreateMutexName(_cacheRoot, volume.SerialNumber));
                 try
                 {
-                    ownsMutex = mutex.WaitOne(_lockTimeout);
+                    if (cancellationToken.CanBeCanceled)
+                    {
+                        var waitResult = WaitHandle.WaitAny(
+                            new WaitHandle[] { mutex, cancellationToken.WaitHandle },
+                            _lockTimeout);
+                        ownsMutex = waitResult == 0;
+                        if (waitResult == 1) throw new OperationCanceledException(cancellationToken);
+                    }
+                    else
+                    {
+                        ownsMutex = mutex.WaitOne(_lockTimeout);
+                    }
                 }
                 catch (AbandonedMutexException)
                 {
@@ -60,6 +76,8 @@ namespace PhotoImporter.Core.Metadata
                     warning = "同じボリュームの Exif キャッシュを別の PhotoImporter が使用しています。キャッシュなしで続行します。";
                     return false;
                 }
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 var volumeFolder = Path.Combine(_cacheRoot, volume.SerialNumberHex);
                 Directory.CreateDirectory(volumeFolder);

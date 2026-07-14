@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Threading;
 
 namespace PhotoImporter.Core.Metadata
 {
@@ -51,7 +52,8 @@ namespace PhotoImporter.Core.Metadata
             VolumeInfo volume,
             ExifCacheStore cacheStore,
             DateTime utcNow,
-            IProgress<PhotoMetadataScanProgress> progress = null)
+            IProgress<PhotoMetadataScanProgress> progress = null,
+            CancellationToken cancellationToken = default(CancellationToken))
         {
             if (analysisPlan == null) throw new ArgumentNullException(nameof(analysisPlan));
             if (cacheStore != null && volume == null) throw new ArgumentNullException(nameof(volume));
@@ -63,6 +65,7 @@ namespace PhotoImporter.Core.Metadata
             var snapshots = new Dictionary<string, ExifFileSnapshot>(StringComparer.OrdinalIgnoreCase);
             foreach (var source in analysisPlan.AnalysisSources)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     snapshots.Add(source, TakeSnapshot(source));
@@ -77,7 +80,7 @@ namespace PhotoImporter.Core.Metadata
             if (cacheStore != null)
             {
                 string warning;
-                if (!cacheStore.TryOpen(volume, out cacheSession, out warning))
+                if (!cacheStore.TryOpen(volume, out cacheSession, out warning, cancellationToken))
                 {
                     if (!string.IsNullOrWhiteSpace(warning)) warnings.Add(warning);
                 }
@@ -94,11 +97,13 @@ namespace PhotoImporter.Core.Metadata
             {
                 foreach (var source in analysisPlan.AnalysisSources)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (results.ContainsKey(source))
                     {
                         completed++;
                         progress?.Report(new PhotoMetadataScanProgress(
                             completed, analysisPlan.AnalysisSources.Count, cacheHits));
+                        cancellationToken.ThrowIfCancellationRequested();
                         continue;
                     }
 
@@ -138,6 +143,7 @@ namespace PhotoImporter.Core.Metadata
                     completed++;
                     progress?.Report(new PhotoMetadataScanProgress(
                         completed, analysisPlan.AnalysisSources.Count, cacheHits));
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
             }
             finally

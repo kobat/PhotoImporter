@@ -34,6 +34,7 @@ namespace PhotoImporter.App
         private double _progressPercent;
         private int _exifCacheHits;
         private CancellationTokenSource _copyCancellation;
+        private CancellationTokenSource _scanCancellation;
 
         public MainWindow()
         {
@@ -83,7 +84,7 @@ namespace PhotoImporter.App
         public Visibility ProgressVisibility => _isCopying || _isScanningExif ? Visibility.Visible : Visibility.Collapsed;
         public bool CanEditSettings => !_isBusy;
         public bool CanSelectItems => !_isBusy;
-        public bool CanCancel => _isCopying;
+        public bool CanCancel => _isCopying || _isScanningExif;
         public bool CanScan => !_isBusy && !string.IsNullOrWhiteSpace(SourceFolder) &&
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
                                !string.IsNullOrWhiteSpace(TemplateText);
@@ -102,6 +103,7 @@ namespace PhotoImporter.App
 
         private async Task<bool> ScanAsync()
         {
+            CancellationTokenSource scanCancellation = null;
             SetBusy(true, false);
             Items.Clear();
             _previewIsCurrent = false;
@@ -127,21 +129,28 @@ namespace PhotoImporter.App
                 IProgress<PhotoMetadataScanProgress> exifProgress = null;
                 if (parseResult.Template.RequiresExif)
                 {
+                    scanCancellation = new CancellationTokenSource();
+                    _scanCancellation = scanCancellation;
                     _isScanningExif = true;
                     _exifCacheHits = 0;
                     ProgressPercent = 0;
                     ProgressText = "Exifスキャン準備中...";
                     OnPropertyChanged(nameof(ProgressVisibility));
+                    OnPropertyChanged(nameof(CanCancel));
                     SetMessage("Exif情報を読み取っています...", Brushes.DimGray);
                     exifProgress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 }
+                var cancellationToken = scanCancellation == null
+                    ? CancellationToken.None
+                    : scanCancellation.Token;
                 var preview = await Task.Run(() => BuildPreview(
                     sourceRoot,
                     destinationRoot,
                     parseResult.Template,
                     overwrite,
                     rawJpegAnalysisMode,
-                    exifProgress));
+                    exifProgress,
+                    cancellationToken), cancellationToken);
                 foreach (var row in preview.Items)
                 {
                     row.PropertyChanged += PreviewItem_PropertyChanged;
@@ -158,12 +167,18 @@ namespace PhotoImporter.App
                         "プレビューを更新しました。", Brushes.DimGray);
                 return true;
             }
+            catch (OperationCanceledException) when (scanCancellation != null && scanCancellation.IsCancellationRequested)
+            {
+                SetMessage("Exifスキャンを停止しました。解析済みのExifデータはキャッシュへ保存しました。", Brushes.DimGray);
+            }
             catch (TemplateException ex) { ShowTemplateError(ex.Error); }
             catch (UnauthorizedAccessException) { SetMessage("アクセスできないフォルダーがあります。権限を確認してください。", Brushes.Firebrick); }
             catch (Exception ex) { SetMessage(ex.Message, Brushes.Firebrick); }
             finally
             {
                 _isScanningExif = false;
+                if (ReferenceEquals(_scanCancellation, scanCancellation)) _scanCancellation = null;
+                scanCancellation?.Dispose();
                 SetBusy(false, false);
                 if (Summary == "スキャン中...") Summary = "0 件";
             }
@@ -231,8 +246,11 @@ namespace PhotoImporter.App
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
+            _scanCancellation?.Cancel();
             _copyCancellation?.Cancel();
-            SetMessage("キャンセルしています...", Brushes.DimGray);
+            SetMessage(_isScanningExif
+                ? "Exifスキャンを停止しています。現在のファイルを完了してキャッシュを保存します..."
+                : "キャンセルしています...", Brushes.DimGray);
         }
 
         private void UpdateCopyProgress(CopyProgress progress)
@@ -267,25 +285,29 @@ namespace PhotoImporter.App
             ParsedTemplate template,
             bool overwriteExisting,
             RawJpegAnalysisMode rawJpegAnalysisMode,
-            IProgress<PhotoMetadataScanProgress> exifProgress = null)
+            IProgress<PhotoMetadataScanProgress> exifProgress = null,
+            CancellationToken cancellationToken = default(CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var result = new List<PreviewItem>();
             var warnings = new List<string>();
             var allocator = new DestinationAllocator(
                 template,
                 new FileSystemDestinationLookup(destinationRoot),
                 overwriteExisting);
-            var scan = EnumerateSourceFiles(sourceRoot);
+            var scan = EnumerateSourceFiles(sourceRoot, cancellationToken);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
             var files = scan.Files.OrderBy(
                 item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase).ToList();
+            cancellationToken.ThrowIfCancellationRequested();
             RawJpegAnalysisPlan analysisPlan = null;
             var metadataBySource = new Dictionary<string, PhotoMetadataReadResult>(StringComparer.OrdinalIgnoreCase);
             if (template.RequiresExif)
             {
                 analysisPlan = RawJpegAnalysisPlan.Create(files, rawJpegAnalysisMode);
+                cancellationToken.ThrowIfCancellationRequested();
                 ExifCacheStore cacheStore = null;
                 var cacheRoot = Path.Combine(AppContext.BaseDirectory, "ExifCache");
                 if (IsSameOrUnder(cacheRoot, sourceRoot) || IsSameOrUnder(sourceRoot, cacheRoot) ||
@@ -312,7 +334,7 @@ namespace PhotoImporter.App
                     }
                 }
                 var metadataScan = new CachedPhotoMetadataScanner().Scan(
-                    analysisPlan, volume, cacheStore, DateTime.UtcNow, exifProgress);
+                    analysisPlan, volume, cacheStore, DateTime.UtcNow, exifProgress, cancellationToken);
                 foreach (var pair in metadataScan.Results)
                     metadataBySource.Add(pair.Key, pair.Value);
                 warnings.AddRange(metadataScan.Warnings);
@@ -320,6 +342,7 @@ namespace PhotoImporter.App
 
             foreach (var path in files)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     var info = new FileInfo(path);
@@ -364,7 +387,9 @@ namespace PhotoImporter.App
             return new PreviewBuildResult(result, warnings);
         }
 
-        private static SourceScanResult EnumerateSourceFiles(string sourceRoot)
+        private static SourceScanResult EnumerateSourceFiles(
+            string sourceRoot,
+            CancellationToken cancellationToken = default(CancellationToken))
         {
             var result = new SourceScanResult();
             var pending = new Stack<string>();
@@ -372,6 +397,7 @@ namespace PhotoImporter.App
 
             while (pending.Count > 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var directory = pending.Pop();
                 FileSystemInfo[] entries;
                 try { entries = new DirectoryInfo(directory).GetFileSystemInfos(); }
@@ -380,6 +406,7 @@ namespace PhotoImporter.App
 
                 foreach (var entry in entries.OrderByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
                         if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;

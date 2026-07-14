@@ -245,6 +245,47 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void WaitingForNamedMutexCanBeCancelled()
+        {
+            var volume = CreateVolume();
+            var cacheRoot = Path.Combine(_root, "cache");
+            var ready = new ManualResetEventSlim();
+            var release = new ManualResetEventSlim();
+            var thread = new Thread(() =>
+            {
+                using (var mutex = new Mutex(false, ExifCacheStore.CreateMutexName(cacheRoot, volume.SerialNumber)))
+                {
+                    mutex.WaitOne();
+                    ready.Set();
+                    release.Wait();
+                    mutex.ReleaseMutex();
+                }
+            });
+            thread.Start();
+            ready.Wait();
+            try
+            {
+                var store = new ExifCacheStore(cacheRoot, Timeout.InfiniteTimeSpan);
+                ExifCacheSession session;
+                string warning;
+
+                using (var cancellation = new CancellationTokenSource())
+                {
+                    cancellation.CancelAfter(TimeSpan.FromMilliseconds(50));
+                    Assert.Throws<OperationCanceledException>(() =>
+                        store.TryOpen(volume, out session, out warning, cancellation.Token));
+                }
+            }
+            finally
+            {
+                release.Set();
+                thread.Join();
+                ready.Dispose();
+                release.Dispose();
+            }
+        }
+
+        [Fact]
         public void MutexNameSeparatesRootsAndVolumes()
         {
             var first = ExifCacheStore.CreateMutexName(Path.Combine(_root, "a"), 1);
