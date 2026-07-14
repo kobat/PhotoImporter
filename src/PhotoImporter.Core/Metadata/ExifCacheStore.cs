@@ -107,7 +107,7 @@ namespace PhotoImporter.Core.Metadata
             }
         }
 
-        private static bool IsCacheFailure(Exception ex) =>
+        internal static bool IsCacheFailure(Exception ex) =>
             ex is IOException || ex is UnauthorizedAccessException ||
             ex is SerializationException || ex is CryptographicException;
     }

@@ -32,6 +32,7 @@ namespace PhotoImporter.App
         private bool _analyzeJpegOnlyForRawJpegPair = true;
         private bool _previewIsCurrent;
         private double _progressPercent;
+        private int _exifCacheHits;
         private CancellationTokenSource _copyCancellation;
 
         public MainWindow()
@@ -123,24 +124,25 @@ namespace PhotoImporter.App
                 var rawJpegAnalysisMode = AnalyzeJpegOnlyForRawJpegPair
                     ? RawJpegAnalysisMode.JpegOnlyForPair
                     : RawJpegAnalysisMode.AnalyzeBoth;
-                IProgress<ExifScanProgress> exifProgress = null;
+                IProgress<PhotoMetadataScanProgress> exifProgress = null;
                 if (parseResult.Template.RequiresExif)
                 {
                     _isScanningExif = true;
+                    _exifCacheHits = 0;
                     ProgressPercent = 0;
                     ProgressText = "Exifスキャン準備中...";
                     OnPropertyChanged(nameof(ProgressVisibility));
                     SetMessage("Exif情報を読み取っています...", Brushes.DimGray);
-                    exifProgress = new Progress<ExifScanProgress>(UpdateExifScanProgress);
+                    exifProgress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 }
-                var rows = await Task.Run(() => BuildPreview(
+                var preview = await Task.Run(() => BuildPreview(
                     sourceRoot,
                     destinationRoot,
                     parseResult.Template,
                     overwrite,
                     rawJpegAnalysisMode,
                     exifProgress));
-                foreach (var row in rows)
+                foreach (var row in preview.Items)
                 {
                     row.PropertyChanged += PreviewItem_PropertyChanged;
                     Items.Add(row);
@@ -148,7 +150,12 @@ namespace PhotoImporter.App
 
                 _previewIsCurrent = true;
                 UpdateSummary();
-                SetMessage(rows.Count == 0 ? "コピー元にファイルがありません。" : "プレビューを更新しました。", Brushes.DimGray);
+                if (preview.Warnings.Count > 0)
+                    SetMessage(string.Join(" ", preview.Warnings), Brushes.DarkGoldenrod);
+                else
+                    SetMessage(preview.Items.Count == 0 ? "コピー元にファイルがありません。" :
+                        _exifCacheHits > 0 ? string.Format("プレビューを更新しました（Exif キャッシュ {0} 件）。", _exifCacheHits) :
+                        "プレビューを更新しました。", Brushes.DimGray);
                 return true;
             }
             catch (TemplateException ex) { ShowTemplateError(ex.Error); }
@@ -241,26 +248,29 @@ namespace PhotoImporter.App
                 FormatBytes(progress.TotalBytes));
         }
 
-        private void UpdateExifScanProgress(ExifScanProgress progress)
+        private void UpdateExifScanProgress(PhotoMetadataScanProgress progress)
         {
+            _exifCacheHits = progress.CacheHits;
             ProgressPercent = progress.TotalFiles == 0
                 ? 100
                 : Math.Min(100, progress.CompletedFiles * 100.0 / progress.TotalFiles);
             ProgressText = string.Format(
-                "Exifスキャン {0}/{1} 件",
+                "Exifスキャン {0}/{1} 件（キャッシュ {2} 件）",
                 progress.CompletedFiles,
-                progress.TotalFiles);
+                progress.TotalFiles,
+                progress.CacheHits);
         }
 
-        private static List<PreviewItem> BuildPreview(
+        private static PreviewBuildResult BuildPreview(
             string sourceRoot,
             string destinationRoot,
             ParsedTemplate template,
             bool overwriteExisting,
             RawJpegAnalysisMode rawJpegAnalysisMode,
-            IProgress<ExifScanProgress> exifProgress = null)
+            IProgress<PhotoMetadataScanProgress> exifProgress = null)
         {
             var result = new List<PreviewItem>();
+            var warnings = new List<string>();
             var allocator = new DestinationAllocator(
                 template,
                 new FileSystemDestinationLookup(destinationRoot),
@@ -276,21 +286,36 @@ namespace PhotoImporter.App
             if (template.RequiresExif)
             {
                 analysisPlan = RawJpegAnalysisPlan.Create(files, rawJpegAnalysisMode);
-                var metadataReader = new PhotoMetadataReader();
-                var completedSources = 0;
-                exifProgress?.Report(new ExifScanProgress(0, analysisPlan.AnalysisSources.Count));
-                foreach (var analysisSource in analysisPlan.AnalysisSources)
+                ExifCacheStore cacheStore = null;
+                var cacheRoot = Path.Combine(AppContext.BaseDirectory, "ExifCache");
+                if (IsSameOrUnder(cacheRoot, sourceRoot) || IsSameOrUnder(sourceRoot, cacheRoot) ||
+                    IsSameOrUnder(cacheRoot, destinationRoot) || IsSameOrUnder(destinationRoot, cacheRoot))
+                {
+                    warnings.Add(string.Format(
+                        "Exif キャッシュの保存先 ({0}) がコピー元またはコピー先と重なるため、キャッシュなしで続行しました。",
+                        cacheRoot));
+                }
+                else cacheStore = new ExifCacheStore(cacheRoot);
+
+                VolumeInfo volume = null;
+                if (cacheStore != null)
                 {
                     try
                     {
-                        metadataBySource.Add(analysisSource, metadataReader.Read(analysisSource));
+                        volume = new WindowsVolumeInfoReader().Read(sourceRoot);
                     }
-                    finally
+                    catch (Exception ex) when (ex is Win32Exception || ex is IOException ||
+                                                   ex is UnauthorizedAccessException)
                     {
-                        completedSources++;
-                        exifProgress?.Report(new ExifScanProgress(completedSources, analysisPlan.AnalysisSources.Count));
+                        warnings.Add("コピー元のボリューム情報を取得できないため、Exif キャッシュなしで続行しました: " + ex.Message);
+                        cacheStore = null;
                     }
                 }
+                var metadataScan = new CachedPhotoMetadataScanner().Scan(
+                    analysisPlan, volume, cacheStore, DateTime.UtcNow, exifProgress);
+                foreach (var pair in metadataScan.Results)
+                    metadataBySource.Add(pair.Key, pair.Value);
+                warnings.AddRange(metadataScan.Warnings);
             }
 
             foreach (var path in files)
@@ -336,7 +361,7 @@ namespace PhotoImporter.App
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (TemplateException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString())); }
             }
-            return result;
+            return new PreviewBuildResult(result, warnings);
         }
 
         private static SourceScanResult EnumerateSourceFiles(string sourceRoot)
@@ -574,16 +599,16 @@ namespace PhotoImporter.App
         public string Message { get; }
     }
 
-    internal sealed class ExifScanProgress
+    internal sealed class PreviewBuildResult
     {
-        public ExifScanProgress(int completedFiles, int totalFiles)
+        public PreviewBuildResult(List<PreviewItem> items, List<string> warnings)
         {
-            CompletedFiles = completedFiles;
-            TotalFiles = totalFiles;
+            Items = items;
+            Warnings = warnings;
         }
 
-        public int CompletedFiles { get; }
-        public int TotalFiles { get; }
+        public List<PreviewItem> Items { get; }
+        public List<string> Warnings { get; }
     }
 
     internal sealed class FileSystemDestinationLookup : IDestinationFileLookup
