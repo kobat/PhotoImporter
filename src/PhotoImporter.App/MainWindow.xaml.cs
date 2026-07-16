@@ -32,6 +32,7 @@ namespace PhotoImporter.App
         private bool _overwriteExisting;
         private bool _analyzeJpegOnlyForRawJpegPair = true;
         private bool _useExifCache = true;
+        private bool _readExifInformation;
         private string _customExifCacheRoot;
         private readonly List<string> _previousExifCacheRoots = new List<string>();
         private readonly PhotoImporterSettingsStore _settingsStore;
@@ -40,9 +41,12 @@ namespace PhotoImporter.App
         private int _exifCacheHits;
         private CancellationTokenSource _copyCancellation;
         private CancellationTokenSource _scanCancellation;
+        private PreviewItem _selectedPreviewItem;
 
         public MainWindow()
         {
+            FileSystemTokenDetails = TokenDetailItem.CreateFileSystemItems();
+            ExifTokenDetails = TokenDetailItem.CreateExifItems();
             _settingsStore = new PhotoImporterSettingsStore(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PhotoImporter",
@@ -66,6 +70,8 @@ namespace PhotoImporter.App
         public event PropertyChangedEventHandler PropertyChanged;
 
         public ObservableCollection<PreviewItem> Items { get; } = new ObservableCollection<PreviewItem>();
+        public IReadOnlyList<TokenDetailItem> FileSystemTokenDetails { get; }
+        public IReadOnlyList<TokenDetailItem> ExifTokenDetails { get; }
 
         public string SourceFolder
         {
@@ -101,6 +107,50 @@ namespace PhotoImporter.App
         {
             get => _useExifCache;
             set { if (Set(ref _useExifCache, value)) SettingsChanged(); }
+        }
+
+        public bool ReadExifInformation
+        {
+            get => _readExifInformation;
+            set { if (Set(ref _readExifInformation, value)) SettingsChanged(); }
+        }
+
+        public PreviewItem SelectedPreviewItem
+        {
+            get => _selectedPreviewItem;
+            set
+            {
+                if (!Set(ref _selectedPreviewItem, value)) return;
+                foreach (var item in FileSystemTokenDetails) item.SetPreviewItem(value);
+                foreach (var item in ExifTokenDetails) item.SetPreviewItem(value);
+                OnPropertyChanged(nameof(SelectedSourcePath));
+                OnPropertyChanged(nameof(ExifReadStatus));
+            }
+        }
+
+        public string SelectedSourcePath => SelectedPreviewItem == null
+            ? "一覧からファイルを選択してください。"
+            : SelectedPreviewItem.SourcePath;
+
+        public string ExifReadStatus
+        {
+            get
+            {
+                if (SelectedPreviewItem == null) return string.Empty;
+                if (SelectedPreviewItem.IsScanError) return "ファイル情報を取得できません。";
+                var result = SelectedPreviewItem.MetadataResult;
+                if (result == null) return "Exif情報は読み込まれていません。";
+                var source = string.IsNullOrWhiteSpace(SelectedPreviewItem.MetadataSourcePath)
+                    ? string.Empty
+                    : " / 解析元: " + SelectedPreviewItem.MetadataSourcePath;
+                switch (result.Status)
+                {
+                    case PhotoMetadataReadStatus.Success: return "Exif読込済み" + source;
+                    case PhotoMetadataReadStatus.NoMetadata: return "Exif情報なし" + source;
+                    case PhotoMetadataReadStatus.Unsupported: return "Exif未対応形式" + source;
+                    default: return "Exif読取エラー: " + result.Error.Message + source;
+                }
+            }
         }
 
         public string ExifCacheRoot => string.IsNullOrWhiteSpace(_customExifCacheRoot)
@@ -145,6 +195,7 @@ namespace PhotoImporter.App
         {
             CancellationTokenSource scanCancellation = null;
             SetBusy(true, false);
+            SelectedPreviewItem = null;
             Items.Clear();
             _previewIsCurrent = false;
             Summary = "スキャン中...";
@@ -167,9 +218,11 @@ namespace PhotoImporter.App
                     ? RawJpegAnalysisMode.JpegOnlyForPair
                     : RawJpegAnalysisMode.AnalyzeBoth;
                 var useExifCache = UseExifCache;
+                var readExifInformation = ReadExifInformation;
                 var exifCacheRoot = ExifCacheRoot;
+                var shouldReadExif = parseResult.Template.RequiresExif || readExifInformation;
                 IProgress<PhotoMetadataScanProgress> exifProgress = null;
-                if (parseResult.Template.RequiresExif)
+                if (shouldReadExif)
                 {
                     scanCancellation = new CancellationTokenSource();
                     _scanCancellation = scanCancellation;
@@ -192,6 +245,7 @@ namespace PhotoImporter.App
                     overwrite,
                     rawJpegAnalysisMode,
                     useExifCache,
+                    readExifInformation,
                     exifCacheRoot,
                     exifProgress,
                     cancellationToken), cancellationToken);
@@ -330,6 +384,7 @@ namespace PhotoImporter.App
             bool overwriteExisting,
             RawJpegAnalysisMode rawJpegAnalysisMode,
             bool useExifCache,
+            bool readExifInformation,
             string exifCacheRoot,
             IProgress<PhotoMetadataScanProgress> exifProgress = null,
             CancellationToken cancellationToken = default(CancellationToken))
@@ -350,7 +405,7 @@ namespace PhotoImporter.App
             cancellationToken.ThrowIfCancellationRequested();
             RawJpegAnalysisPlan analysisPlan = null;
             var metadataBySource = new Dictionary<string, PhotoMetadataReadResult>(StringComparer.OrdinalIgnoreCase);
-            if (template.RequiresExif)
+            if (template.RequiresExif || readExifInformation)
             {
                 analysisPlan = RawJpegAnalysisPlan.Create(files, rawJpegAnalysisMode);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -396,14 +451,14 @@ namespace PhotoImporter.App
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
                     var analysisSource = analysisPlan == null ? path : analysisPlan.GetAnalysisSource(path);
                     var metadataResult = analysisPlan == null ? null : metadataBySource[analysisSource];
-                    if (metadataResult != null && metadataResult.Status == PhotoMetadataReadStatus.ReadError)
+                    if (template.RequiresExif && metadataResult != null &&
+                        metadataResult.Status == PhotoMetadataReadStatus.ReadError)
                         throw metadataResult.Error;
                     var metadata = metadataResult == null ? PhotoMetadata.Empty : metadataResult.Metadata;
                     var analysisSourceInfo = string.Equals(path, analysisSource, StringComparison.OrdinalIgnoreCase)
                         ? info
                         : new FileInfo(analysisSource);
-                    var allocation = allocator.Allocate(
-                        new FileTemplateContext(
+                    var context = new FileTemplateContext(
                             info.Name,
                             info.LastWriteTime,
                             info.Length,
@@ -412,8 +467,8 @@ namespace PhotoImporter.App
                             info.LastWriteTimeUtc,
                             analysisSourceInfo.LastWriteTime,
                             analysisSourceInfo.LastWriteTimeUtc,
-                            (info.Attributes & FileAttributes.ReadOnly) != 0),
-                        info.LastWriteTimeUtc);
+                            (info.Attributes & FileAttributes.ReadOnly) != 0);
+                    var allocation = allocator.Allocate(context, info.LastWriteTimeUtc);
                     var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
                     var plan = allocation.Status == DestinationStatus.NotImported ||
                                allocation.Status == DestinationStatus.Overwrite
@@ -425,7 +480,16 @@ namespace PhotoImporter.App
                             allocation.DestinationSnapshot,
                             allocation.Status == DestinationStatus.Overwrite)
                         : null;
-                    result.Add(new PreviewItem(sourcePath, allocation.RelativePath, allocation.Status, plan, allocation.Warnings));
+                    result.Add(new PreviewItem(
+                        sourcePath,
+                        allocation.RelativePath,
+                        allocation.Status,
+                        plan,
+                        allocation.Warnings,
+                        context,
+                        metadataResult,
+                        analysisPlan == null ? null : MakeRelative(sourceRoot, analysisSource),
+                        allocation.SequenceNumber));
                 }
                 catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
@@ -577,6 +641,7 @@ namespace PhotoImporter.App
             _overwriteExisting = settings.OverwriteExisting;
             _analyzeJpegOnlyForRawJpegPair = settings.AnalyzeJpegOnlyForRawJpegPair;
             _useExifCache = settings.UseExifCache;
+            _readExifInformation = settings.ReadExifInformation;
             _customExifCacheRoot = settings.CustomExifCacheRoot;
             _previousExifCacheRoots.Clear();
             _previousExifCacheRoots.AddRange(settings.PreviousExifCacheRoots);
@@ -594,6 +659,7 @@ namespace PhotoImporter.App
                 OverwriteExisting = OverwriteExisting,
                 AnalyzeJpegOnlyForRawJpegPair = AnalyzeJpegOnlyForRawJpegPair,
                 UseExifCache = UseExifCache,
+                ReadExifInformation = ReadExifInformation,
                 CustomExifCacheRoot = _customExifCacheRoot
             };
             foreach (var path in _previousExifCacheRoots) settings.PreviousExifCacheRoots.Add(path);
@@ -701,6 +767,155 @@ namespace PhotoImporter.App
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
+    public sealed class TokenDetailItem : INotifyPropertyChanged
+    {
+        private readonly TemplateTokenKind _token;
+        private readonly bool _isExif;
+        private string _format;
+        private string _value = "—";
+        private PreviewItem _previewItem;
+
+        private TokenDetailItem(
+            TemplateTokenKind token,
+            bool isExif,
+            bool supportsFormat,
+            string formatHint,
+            string defaultFormat = null)
+        {
+            _token = token;
+            _isExif = isExif;
+            SupportsFormat = supportsFormat;
+            FormatHint = formatHint;
+            _format = defaultFormat ?? string.Empty;
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        public string Token => "{" + _token + "}";
+        public bool SupportsFormat { get; }
+        public string FormatHint { get; }
+        public string Format
+        {
+            get => _format;
+            set
+            {
+                if (_format == value) return;
+                _format = value ?? string.Empty;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Format)));
+                Recalculate();
+            }
+        }
+        public string Value
+        {
+            get => _value;
+            private set
+            {
+                if (_value == value) return;
+                _value = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Value)));
+            }
+        }
+
+        public void SetPreviewItem(PreviewItem previewItem)
+        {
+            _previewItem = previewItem;
+            Recalculate();
+        }
+
+        private void Recalculate()
+        {
+            if (_previewItem == null || _previewItem.TemplateContext == null)
+            {
+                Value = "—";
+                return;
+            }
+            if (_isExif && _previewItem.MetadataResult == null)
+            {
+                Value = "未読み込み";
+                return;
+            }
+            if (_isExif && _previewItem.MetadataResult.Status == PhotoMetadataReadStatus.ReadError)
+            {
+                Value = "読取エラー";
+                return;
+            }
+
+            var format = SupportsFormat && !string.IsNullOrEmpty(Format) ? ":" + Format : string.Empty;
+            var source = "x{" + _token + format + "}";
+            var parsed = TemplateParser.Parse(source);
+            if (!parsed.IsValid)
+            {
+                Value = "書式エラー: " + parsed.Error.Code;
+                return;
+            }
+
+            try
+            {
+                var evaluated = TemplateEvaluator.Evaluate(
+                    parsed.Template,
+                    _previewItem.TemplateContext,
+                    _token == TemplateTokenKind.Sequence ? _previewItem.SequenceNumber : null);
+                var tokenValue = evaluated.Length == 0 ? string.Empty : evaluated.Substring(1);
+                Value = tokenValue.Length == 0 ? "（空文字）" : tokenValue;
+            }
+            catch (TemplateException ex)
+            {
+                Value = "書式エラー: " + ex.Error.Code;
+            }
+        }
+
+        public static IReadOnlyList<TokenDetailItem> CreateFileSystemItems() => new[]
+        {
+            Item(TemplateTokenKind.OriginalName),
+            Item(TemplateTokenKind.FileName),
+            Item(TemplateTokenKind.Extension),
+            Item(TemplateTokenKind.SourceRelativeDirectory, true, "末尾からの階層数（例: 1）"),
+            Item(TemplateTokenKind.ModifiedDate, true, "日時書式（例: yyyy-MM-dd）"),
+            Item(TemplateTokenKind.FileSize),
+            Item(TemplateTokenKind.Protected),
+            Item(TemplateTokenKind.Sequence, true, "桁数（1～9）")
+        };
+
+        public static IReadOnlyList<TokenDetailItem> CreateExifItems() => new[]
+        {
+            ExifItem(TemplateTokenKind.TakenDate, true, "日時書式（例: yyyy-MM-dd）"),
+            ExifItem(TemplateTokenKind.TakenDateLocal, true, "日時書式（例: yyyy-MM-dd）"),
+            ExifItem(TemplateTokenKind.TakenDateInTimeZone, true, "例: JST|yyyy-MM-dd", "JST|yyyy-MM-dd HH-mm-ss"),
+            ExifItem(TemplateTokenKind.CameraMake),
+            ExifItem(TemplateTokenKind.CameraModel),
+            ExifItem(TemplateTokenKind.CameraSerial),
+            ExifItem(TemplateTokenKind.Lens),
+            ExifItem(TemplateTokenKind.Width, true, "数値書式（例: D5）"),
+            ExifItem(TemplateTokenKind.Height, true, "数値書式（例: D5）"),
+            ExifItem(TemplateTokenKind.ExifWidth, true, "数値書式（例: D5）"),
+            ExifItem(TemplateTokenKind.ExifHeight, true, "数値書式（例: D5）"),
+            ExifItem(TemplateTokenKind.Orientation, true, "数値書式"),
+            ExifItem(TemplateTokenKind.Aperture, true, "数値書式（例: 0.0）"),
+            ExifItem(TemplateTokenKind.ShutterSpeed, true, "1-250s / 1_250s など"),
+            ExifItem(TemplateTokenKind.ExposureTime, true, "数値書式（例: 0.0000）"),
+            ExifItem(TemplateTokenKind.Iso, true, "数値書式（例: D4）"),
+            ExifItem(TemplateTokenKind.FocalLength, true, "数値書式（例: 0.0）"),
+            ExifItem(TemplateTokenKind.FocalLength35mm, true, "数値書式"),
+            ExifItem(TemplateTokenKind.Rating, true, "数値書式"),
+            ExifItem(TemplateTokenKind.HasGps),
+            ExifItem(TemplateTokenKind.GpsLatitude, true, "dms / dm"),
+            ExifItem(TemplateTokenKind.GpsLongitude, true, "dms / dm"),
+            ExifItem(TemplateTokenKind.GpsAltitude, true, "数値書式（例: 0.0）")
+        };
+
+        private static TokenDetailItem Item(
+            TemplateTokenKind token,
+            bool supportsFormat = false,
+            string formatHint = null) =>
+            new TokenDetailItem(token, false, supportsFormat, formatHint);
+
+        private static TokenDetailItem ExifItem(
+            TemplateTokenKind token,
+            bool supportsFormat = false,
+            string formatHint = null,
+            string defaultFormat = null) =>
+            new TokenDetailItem(token, true, supportsFormat, formatHint, defaultFormat);
+    }
+
     public sealed class PreviewItem : INotifyPropertyChanged
     {
         private bool _isSelected;
@@ -711,13 +926,21 @@ namespace PhotoImporter.App
             string destinationPath,
             DestinationStatus destinationStatus,
             CopyPlanItem copyPlan,
-            IReadOnlyList<TemplateWarningCode> warnings = null)
+            IReadOnlyList<TemplateWarningCode> warnings = null,
+            FileTemplateContext templateContext = null,
+            PhotoMetadataReadResult metadataResult = null,
+            string metadataSourcePath = null,
+            int? sequenceNumber = null)
         {
             SourcePath = sourcePath;
             DestinationPath = destinationPath;
             DestinationStatus = destinationStatus;
             CopyPlan = copyPlan;
             Warnings = warnings ?? new TemplateWarningCode[0];
+            TemplateContext = templateContext;
+            MetadataResult = metadataResult;
+            MetadataSourcePath = metadataSourcePath;
+            SequenceNumber = sequenceNumber;
             _isSelected = copyPlan != null;
         }
 
@@ -727,6 +950,10 @@ namespace PhotoImporter.App
         public DestinationStatus DestinationStatus { get; }
         public CopyPlanItem CopyPlan { get; }
         public IReadOnlyList<TemplateWarningCode> Warnings { get; }
+        public FileTemplateContext TemplateContext { get; }
+        public PhotoMetadataReadResult MetadataResult { get; }
+        public string MetadataSourcePath { get; }
+        public int? SequenceNumber { get; }
         public bool CanCopy => CopyPlan != null && !IsScanError;
         public bool IsScanError { get; private set; }
         public string ErrorMessage { get; private set; }

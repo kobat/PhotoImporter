@@ -18,6 +18,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal("A.jpg", result.RelativePath);
             Assert.Equal(DestinationStatus.NotImported, result.Status);
             Assert.Null(result.DestinationSnapshot);
+            Assert.Null(result.SequenceNumber);
         }
 
         [Theory]
@@ -51,6 +52,7 @@ namespace PhotoImporter.Core.Tests
 
             Assert.Equal("A_002.jpg", result.RelativePath);
             Assert.Equal(DestinationStatus.NotImported, result.Status);
+            Assert.Equal(2, result.SequenceNumber);
         }
 
         [Fact]
@@ -95,6 +97,8 @@ namespace PhotoImporter.Core.Tests
 
             Assert.Equal("A.jpg", first.RelativePath);
             Assert.Equal("A_001.jpg", second.RelativePath);
+            Assert.Null(first.SequenceNumber);
+            Assert.Equal(1, second.SequenceNumber);
         }
 
         [Fact]

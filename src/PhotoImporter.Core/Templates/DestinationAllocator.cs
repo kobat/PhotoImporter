@@ -43,18 +43,21 @@ namespace PhotoImporter.Core.Templates
             string relativePath,
             DestinationStatus status,
             DestinationFileSnapshot destinationSnapshot,
-            IList<TemplateWarningCode> warnings)
+            IList<TemplateWarningCode> warnings,
+            int? sequenceNumber)
         {
             RelativePath = relativePath;
             Status = status;
             DestinationSnapshot = destinationSnapshot;
             Warnings = new ReadOnlyCollection<TemplateWarningCode>(warnings ?? new List<TemplateWarningCode>());
+            SequenceNumber = sequenceNumber;
         }
 
         public string RelativePath { get; }
         public DestinationStatus Status { get; }
         public DestinationFileSnapshot DestinationSnapshot { get; }
         public IReadOnlyList<TemplateWarningCode> Warnings { get; }
+        public int? SequenceNumber { get; }
     }
 
     public sealed class DestinationAllocator
@@ -82,7 +85,7 @@ namespace PhotoImporter.Core.Templates
 
             var basicEvaluation = TemplateEvaluator.EvaluateDetailed(_template, context);
             var basicCandidate = basicEvaluation.RelativePath;
-            var basic = CheckCandidate(basicCandidate, sourceLastWriteTimeUtc, basicEvaluation.Warnings);
+            var basic = CheckCandidate(basicCandidate, sourceLastWriteTimeUtc, basicEvaluation.Warnings, null);
             if (basic != null) return basic;
 
             if (!_template.HasSequence)
@@ -94,7 +97,7 @@ namespace PhotoImporter.Core.Templates
             {
                 var evaluation = TemplateEvaluator.EvaluateDetailed(_template, context, sequence);
                 var candidate = evaluation.RelativePath;
-                var allocation = CheckCandidate(candidate, sourceLastWriteTimeUtc, evaluation.Warnings);
+                var allocation = CheckCandidate(candidate, sourceLastWriteTimeUtc, evaluation.Warnings, sequence);
                 if (allocation != null) return allocation;
             }
 
@@ -104,16 +107,17 @@ namespace PhotoImporter.Core.Templates
         private DestinationAllocation CheckCandidate(
             string relativePath,
             DateTime sourceLastWriteTimeUtc,
-            IReadOnlyList<TemplateWarningCode> warnings)
+            IReadOnlyList<TemplateWarningCode> warnings,
+            int? sequenceNumber)
         {
             if (_reserved.Contains(relativePath)) return null;
 
             DestinationFileSnapshot destination;
             if (!_lookup.TryGetFile(relativePath, out destination))
-                return Reserve(relativePath, DestinationStatus.NotImported, null, warnings);
+                return Reserve(relativePath, DestinationStatus.NotImported, null, warnings, sequenceNumber);
 
             if (sourceLastWriteTimeUtc <= destination.LastWriteTimeUtc)
-                return Reserve(relativePath, DestinationStatus.Imported, destination, warnings);
+                return Reserve(relativePath, DestinationStatus.Imported, destination, warnings, sequenceNumber);
 
             if (_template.HasSequence)
                 return null;
@@ -122,24 +126,27 @@ namespace PhotoImporter.Core.Templates
                 relativePath,
                 _overwriteExisting ? DestinationStatus.Overwrite : DestinationStatus.Conflict,
                 destination,
-                warnings);
+                warnings,
+                sequenceNumber);
         }
 
         private DestinationAllocation ReserveConflict(string relativePath, IReadOnlyList<TemplateWarningCode> warnings)
         {
             DestinationFileSnapshot destination;
             _lookup.TryGetFile(relativePath, out destination);
-            return Reserve(relativePath, DestinationStatus.Conflict, destination, warnings);
+            return Reserve(relativePath, DestinationStatus.Conflict, destination, warnings, null);
         }
 
         private DestinationAllocation Reserve(
             string relativePath,
             DestinationStatus status,
             DestinationFileSnapshot destination,
-            IReadOnlyList<TemplateWarningCode> warnings)
+            IReadOnlyList<TemplateWarningCode> warnings,
+            int? sequenceNumber)
         {
             _reserved.Add(relativePath);
-            return new DestinationAllocation(relativePath, status, destination, new List<TemplateWarningCode>(warnings));
+            return new DestinationAllocation(
+                relativePath, status, destination, new List<TemplateWarningCode>(warnings), sequenceNumber);
         }
     }
 }

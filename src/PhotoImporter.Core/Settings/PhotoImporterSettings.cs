@@ -17,6 +17,7 @@ namespace PhotoImporter.Core.Settings
             TemplateText = DefaultTemplate;
             AnalyzeJpegOnlyForRawJpegPair = true;
             UseExifCache = true;
+            ReadExifInformation = false;
             PreviousExifCacheRoots = new List<string>();
         }
 
@@ -26,6 +27,7 @@ namespace PhotoImporter.Core.Settings
         public bool OverwriteExisting { get; set; }
         public bool AnalyzeJpegOnlyForRawJpegPair { get; set; }
         public bool UseExifCache { get; set; }
+        public bool ReadExifInformation { get; set; }
         public string CustomExifCacheRoot { get; set; }
         public IList<string> PreviousExifCacheRoots { get; }
 
@@ -78,6 +80,7 @@ namespace PhotoImporter.Core.Settings
                     OverwriteExisting = ReadBoolean(root, "OverwriteExisting", false),
                     AnalyzeJpegOnlyForRawJpegPair = ReadBoolean(root, "AnalyzeJpegOnlyForRawJpegPair", true),
                     UseExifCache = ReadBoolean(root, "UseExifCache", true),
+                    ReadExifInformation = ReadBoolean(root, "ReadExifInformation", false),
                     CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot"))
                 };
 
@@ -131,6 +134,7 @@ namespace PhotoImporter.Core.Settings
                         new XElement("OverwriteExisting", settings.OverwriteExisting),
                         new XElement("AnalyzeJpegOnlyForRawJpegPair", settings.AnalyzeJpegOnlyForRawJpegPair),
                         new XElement("UseExifCache", settings.UseExifCache),
+                        new XElement("ReadExifInformation", settings.ReadExifInformation),
                         new XElement("CustomExifCacheRoot", settings.CustomExifCacheRoot ?? string.Empty),
                         new XElement("PreviousExifCacheRoots",
                             settings.PreviousExifCacheRoots

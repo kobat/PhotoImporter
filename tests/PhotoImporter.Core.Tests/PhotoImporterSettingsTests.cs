@@ -20,6 +20,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(PhotoImporterSettings.DefaultTemplate, settings.TemplateText);
             Assert.True(settings.AnalyzeJpegOnlyForRawJpegPair);
             Assert.True(settings.UseExifCache);
+            Assert.False(settings.ReadExifInformation);
             Assert.Null(settings.CustomExifCacheRoot);
             Assert.Empty(settings.PreviousExifCacheRoots);
         }
@@ -39,6 +40,7 @@ namespace PhotoImporter.Core.Tests
                 OverwriteExisting = true,
                 AnalyzeJpegOnlyForRawJpegPair = false,
                 UseExifCache = false,
+                ReadExifInformation = true,
                 CustomExifCacheRoot = customCache
             };
             settings.PreviousExifCacheRoots.Add(previousCache);
@@ -53,6 +55,7 @@ namespace PhotoImporter.Core.Tests
             Assert.True(loaded.OverwriteExisting);
             Assert.False(loaded.AnalyzeJpegOnlyForRawJpegPair);
             Assert.False(loaded.UseExifCache);
+            Assert.True(loaded.ReadExifInformation);
             Assert.Equal(Path.GetFullPath(customCache), loaded.CustomExifCacheRoot);
             Assert.Single(loaded.PreviousExifCacheRoots);
             Assert.Equal(Path.GetFullPath(previousCache), loaded.PreviousExifCacheRoots[0], ignoreCase: true);
