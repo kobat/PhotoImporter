@@ -773,26 +773,39 @@ namespace PhotoImporter.App
         private readonly bool _isExif;
         private string _format;
         private string _value = "—";
+        private bool _isFormatEditorVisible;
         private PreviewItem _previewItem;
 
         private TokenDetailItem(
             TemplateTokenKind token,
             bool isExif,
-            bool supportsFormat,
-            string formatHint,
+            string description,
+            string formatDescription = null,
             string defaultFormat = null)
         {
             _token = token;
             _isExif = isExif;
-            SupportsFormat = supportsFormat;
-            FormatHint = formatHint;
+            Description = description;
+            FormatDescription = formatDescription;
+            SupportsFormat = formatDescription != null;
             _format = defaultFormat ?? string.Empty;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
         public string Token => "{" + _token + "}";
         public bool SupportsFormat { get; }
-        public string FormatHint { get; }
+        public string Description { get; }
+        public string FormatDescription { get; }
+        public bool IsFormatEditorVisible
+        {
+            get => _isFormatEditorVisible;
+            set
+            {
+                if (_isFormatEditorVisible == value) return;
+                _isFormatEditorVisible = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFormatEditorVisible)));
+            }
+        }
         public string Format
         {
             get => _format;
@@ -865,55 +878,137 @@ namespace PhotoImporter.App
 
         public static IReadOnlyList<TokenDetailItem> CreateFileSystemItems() => new[]
         {
-            Item(TemplateTokenKind.OriginalName),
-            Item(TemplateTokenKind.FileName),
-            Item(TemplateTokenKind.Extension),
-            Item(TemplateTokenKind.SourceRelativeDirectory, true, "末尾からの階層数（例: 1）"),
-            Item(TemplateTokenKind.ModifiedDate, true, "日時書式（例: yyyy-MM-dd）"),
-            Item(TemplateTokenKind.FileSize),
-            Item(TemplateTokenKind.Protected),
-            Item(TemplateTokenKind.Sequence, true, "桁数（1～9）")
+            Item(TemplateTokenKind.OriginalName,
+                "元ファイル名。最後の拡張子を含みます（例: DSC_0101.NEF）。"),
+            Item(TemplateTokenKind.FileName,
+                "元ファイル名から最後の拡張子を除いた部分です（例: DSC_0101）。"),
+            Item(TemplateTokenKind.Extension,
+                "最後の拡張子。先頭のピリオドを含み、拡張子がなければ空文字になります（例: .NEF）。"),
+            Item(TemplateTokenKind.SourceRelativeDirectory,
+                "コピー元ルートからファイル格納フォルダーまでの相対パス。コピー元ルート直下では空文字になります。",
+                SourceDirectoryFormatDescription),
+            Item(TemplateTokenKind.ModifiedDate,
+                "元ファイルの最終更新日時です。",
+                DateFormatDescription),
+            Item(TemplateTokenKind.FileSize,
+                "元ファイルのバイト数を10進整数で表示します。"),
+            Item(TemplateTokenKind.Protected,
+                "読み取り専用属性があれば Protected、なければ Unprotected を表示します。"),
+            Item(TemplateTokenKind.Sequence,
+                "宛先の競合を避ける連番。競合がなければ空文字、競合時はアンダースコア付きの連番になります。",
+                SequenceFormatDescription)
         };
 
         public static IReadOnlyList<TokenDetailItem> CreateExifItems() => new[]
         {
-            ExifItem(TemplateTokenKind.TakenDate, true, "日時書式（例: yyyy-MM-dd）"),
-            ExifItem(TemplateTokenKind.TakenDateLocal, true, "日時書式（例: yyyy-MM-dd）"),
-            ExifItem(TemplateTokenKind.TakenDateInTimeZone, true, "例: JST|yyyy-MM-dd", "JST|yyyy-MM-dd HH-mm-ss"),
-            ExifItem(TemplateTokenKind.CameraMake),
-            ExifItem(TemplateTokenKind.CameraModel),
-            ExifItem(TemplateTokenKind.CameraSerial),
-            ExifItem(TemplateTokenKind.Lens),
-            ExifItem(TemplateTokenKind.Width, true, "数値書式（例: D5）"),
-            ExifItem(TemplateTokenKind.Height, true, "数値書式（例: D5）"),
-            ExifItem(TemplateTokenKind.ExifWidth, true, "数値書式（例: D5）"),
-            ExifItem(TemplateTokenKind.ExifHeight, true, "数値書式（例: D5）"),
-            ExifItem(TemplateTokenKind.Orientation, true, "数値書式"),
-            ExifItem(TemplateTokenKind.Aperture, true, "数値書式（例: 0.0）"),
-            ExifItem(TemplateTokenKind.ShutterSpeed, true, "1-250s / 1_250s など"),
-            ExifItem(TemplateTokenKind.ExposureTime, true, "数値書式（例: 0.0000）"),
-            ExifItem(TemplateTokenKind.Iso, true, "数値書式（例: D4）"),
-            ExifItem(TemplateTokenKind.FocalLength, true, "数値書式（例: 0.0）"),
-            ExifItem(TemplateTokenKind.FocalLength35mm, true, "数値書式"),
-            ExifItem(TemplateTokenKind.Rating, true, "数値書式"),
-            ExifItem(TemplateTokenKind.HasGps),
-            ExifItem(TemplateTokenKind.GpsLatitude, true, "dms / dm"),
-            ExifItem(TemplateTokenKind.GpsLongitude, true, "dms / dm"),
-            ExifItem(TemplateTokenKind.GpsAltitude, true, "数値書式（例: 0.0）")
+            ExifItem(TemplateTokenKind.TakenDate,
+                "Exifの撮影日時をタイムゾーン変換せず、記録された壁時計値のまま表示します。サブ秒も使用できます。",
+                DateFormatDescription),
+            ExifItem(TemplateTokenKind.TakenDateLocal,
+                "Exifの撮影日時を、このPCの現在のタイムゾーンへ変換して表示します。",
+                DateFormatDescription),
+            ExifItem(TemplateTokenKind.TakenDateInTimeZone,
+                "Exifの撮影日時を、指定したタイムゾーンへ変換して表示します。",
+                TimeZoneFormatDescription,
+                "JST|yyyy-MM-dd HH-mm-ss"),
+            ExifItem(TemplateTokenKind.CameraMake,
+                "カメラのメーカー名。値がなければ Unknown になります。"),
+            ExifItem(TemplateTokenKind.CameraModel,
+                "カメラのモデル名。値がなければ Unknown になります。"),
+            ExifItem(TemplateTokenKind.CameraSerial,
+                "カメラボディのシリアル番号。値がなければ Unknown になります。"),
+            ExifItem(TemplateTokenKind.Lens,
+                "レンズのモデル名。値がなければ Unknown になります。"),
+            ExifItem(TemplateTokenKind.Width,
+                "Exifの向きを反映した画像の幅（ピクセル）です。",
+                IntegerNumberFormatDescription),
+            ExifItem(TemplateTokenKind.Height,
+                "Exifの向きを反映した画像の高さ（ピクセル）です。",
+                IntegerNumberFormatDescription),
+            ExifItem(TemplateTokenKind.ExifWidth,
+                "Exifに記録された向き反映前の幅（ピクセル）です。",
+                IntegerNumberFormatDescription),
+            ExifItem(TemplateTokenKind.ExifHeight,
+                "Exifに記録された向き反映前の高さ（ピクセル）です。",
+                IntegerNumberFormatDescription),
+            ExifItem(TemplateTokenKind.Orientation,
+                "Exif Orientation の値（1～8）です。",
+                IntegerNumberFormatDescription),
+            ExifItem(TemplateTokenKind.Aperture,
+                "絞り値。書式を省略すると F2.8 のように表示します。",
+                NumberWithoutUnitFormatDescription),
+            ExifItem(TemplateTokenKind.ShutterSpeed,
+                "シャッタースピード。書式を省略すると 1-250s のように表示します。",
+                ShutterSpeedFormatDescription),
+            ExifItem(TemplateTokenKind.ExposureTime,
+                "露光時間を秒単位の10進数で表示します。既定は小数最大6桁で末尾のゼロを省略します。",
+                DecimalNumberFormatDescription),
+            ExifItem(TemplateTokenKind.Iso,
+                "ISO感度を整数で表示します。",
+                IntegerNumberFormatDescription),
+            ExifItem(TemplateTokenKind.FocalLength,
+                "焦点距離。書式を省略すると 35mm または 23.5mm のように表示します。",
+                NumberWithoutUnitFormatDescription),
+            ExifItem(TemplateTokenKind.FocalLength35mm,
+                "35mm判換算焦点距離。書式を省略すると 35mm のように表示します。",
+                NumberWithoutUnitFormatDescription),
+            ExifItem(TemplateTokenKind.Rating,
+                "評価（スター）を1～5で表示します。除外は Rejected、未評価は Unknown になります。",
+                RatingFormatDescription),
+            ExifItem(TemplateTokenKind.HasGps,
+                "有効なGPS位置情報があれば GPS、なければ NoGPS を表示します。"),
+            ExifItem(TemplateTokenKind.GpsLatitude,
+                "緯度。書式を省略すると符号付き10進度・小数6桁で表示します。",
+                GpsFormatDescription),
+            ExifItem(TemplateTokenKind.GpsLongitude,
+                "経度。書式を省略すると符号付き10進度・小数6桁で表示します。",
+                GpsFormatDescription),
+            ExifItem(TemplateTokenKind.GpsAltitude,
+                "高度（メートル）。書式を省略すると 34.5m のように表示し、海面下は負値になります。",
+                NumberWithoutUnitFormatDescription)
         };
+
+        private const string DateFormatDescription =
+            "指定できる書式: .NETカスタム日時書式（InvariantCulture）。既定は yyyyMMdd_HHmmss。" +
+            "指定子は d/dd/ddd/dddd（日）、f～fffffff・F～FFFFFFF（秒の小数部）、g（紀元）、h/hh（12時間）、H/HH（24時間）、K（タイムゾーン）、m/mm（分）、M/MM/MMM/MMMM（月）、s/ss（秒）、t/tt（午前/午後）、y/yy/yyy以上（年）、z/zz/zzz（UTC差）、引用符付きリテラル、%（単独指定子）、\\（エスケープ）です。" +
+            ": と / は日時区切り指定子ですが、結果にコロン、スラッシュなどWindowsパスで使用できない文字を含む書式は指定できません。";
+        private const string TimeZoneFormatDescription =
+            "指定できる書式: タイムゾーン指定子、または タイムゾーン指定子|日時書式。" +
+            "指定子は UTC、JST、PST、MST、CST、EST、GMT、CET、または UTC±H / UTC±HH:MM（UTC-14:00～UTC+14:00）。" +
+            "日時書式を省略した場合は yyyyMMdd_HHmmss。" + DateFormatDescription;
+        private const string IntegerNumberFormatDescription =
+            "指定できる書式: .NET整数書式（InvariantCulture）。標準指定子は C、D、E、F、G、N、P、X（後ろに精度数字を指定可能）。" +
+            "カスタム指定子は 0、#、小数点、桁区切り・スケーリングのコンマ、%、‰、指数 E0/E+0/E-0、\\（エスケープ）、引用符付きリテラル、;（正・負・ゼロのセクション）で、組み合わせて指定できます。" +
+            "結果にWindowsパスで使用できない文字を含む書式は指定できません。値がなければ書式にかかわらず Unknown になります。";
+        private const string DecimalNumberFormatDescription =
+            "指定できる書式: .NET小数書式（InvariantCulture）。標準指定子は C、E、F、G、N、P（後ろに精度数字を指定可能）。" +
+            "カスタム指定子は 0、#、小数点、桁区切り・スケーリングのコンマ、%、‰、指数 E0/E+0/E-0、\\（エスケープ）、引用符付きリテラル、;（正・負・ゼロのセクション）で、組み合わせて指定できます。" +
+            "結果にWindowsパスで使用できない文字を含む書式は指定できません。値がなければ書式にかかわらず Unknown になります。";
+        private const string NumberWithoutUnitFormatDescription =
+            DecimalNumberFormatDescription + " 書式を指定した場合、F、mm、mなどの接頭辞・単位は付かず、数値だけを表示します。";
+        private const string RatingFormatDescription =
+            IntegerNumberFormatDescription + " 書式は評価1～5だけに適用され、Rejected と Unknown には適用されません。";
+        private const string SourceDirectoryFormatDescription =
+            "指定できる書式: 末尾から残す階層数を、先頭ゼロや符号のない1以上の10進整数で指定します。省略時は全階層を表示します。";
+        private const string SequenceFormatDescription =
+            "指定できる書式: 1～9の桁数。省略時は3桁です（例: 4を指定すると _0001）。";
+        private const string ShutterSpeedFormatDescription =
+            "指定できる書式: 1-250s、1-250、1_250s、1_250 の4種類。省略時は1-250sです。";
+        private const string GpsFormatDescription =
+            "指定できる書式: dms（度-分-秒・小数1桁・半球記号）または dm（度-10進分・小数3桁・半球記号）。省略時は符号付き10進度・小数6桁です。";
 
         private static TokenDetailItem Item(
             TemplateTokenKind token,
-            bool supportsFormat = false,
-            string formatHint = null) =>
-            new TokenDetailItem(token, false, supportsFormat, formatHint);
+            string description,
+            string formatDescription = null) =>
+            new TokenDetailItem(token, false, description, formatDescription);
 
         private static TokenDetailItem ExifItem(
             TemplateTokenKind token,
-            bool supportsFormat = false,
-            string formatHint = null,
+            string description,
+            string formatDescription = null,
             string defaultFormat = null) =>
-            new TokenDetailItem(token, true, supportsFormat, formatHint, defaultFormat);
+            new TokenDetailItem(token, true, description, formatDescription, defaultFormat);
     }
 
     public sealed class PreviewItem : INotifyPropertyChanged

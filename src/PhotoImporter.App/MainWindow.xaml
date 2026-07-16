@@ -14,17 +14,70 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="TokenNameColumn" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding Token}" FontFamily="Consolas" FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <TextBox Grid.Column="1" Text="{Binding Format, UpdateSourceTrigger=PropertyChanged}"
-                             IsEnabled="{Binding SupportsFormat}" ToolTip="{Binding FormatHint}"
-                             Padding="4,2" />
-                    <TextBox Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Value, Mode=OneWay}"
-                             IsReadOnly="True" BorderThickness="0" Background="Transparent"
-                             Padding="0,4,0,0" TextWrapping="Wrap" />
+                    <TextBlock Grid.Column="1" Text="{Binding Value, Mode=OneWay}"
+                               Margin="12,0,8,0" VerticalAlignment="Center"
+                               TextWrapping="Wrap" />
+                    <ToggleButton Grid.Column="2" Width="24" Height="24" Padding="0"
+                                  FontSize="10" IsChecked="{Binding IsFormatEditorVisible, Mode=TwoWay}"
+                                  AutomationProperties.Name="トークン詳細の表示切り替え"
+                                  ToolTip="トークンの説明と書式設定の表示を切り替えます">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton">
+                                <Setter Property="Content" Value="▼" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter Property="Content" Value="▲" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+                    </ToggleButton>
+                    <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,7,0,0">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFormatEditorVisible}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBox Text="{Binding Format, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="書式設定" Padding="4,2" Margin="0,0,0,7">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SupportsFormat}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBlock Text="{Binding Description}" Foreground="DimGray"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding FormatDescription}" Margin="0,7,0,0"
+                                   Foreground="DimGray" TextWrapping="Wrap">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SupportsFormat}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -101,7 +154,7 @@
         <Expander Grid.Row="5" Header="Exif キャッシュ設定" Margin="0,0,0,10"
                   IsEnabled="{Binding CanEditSettings}">
             <StackPanel Margin="112,8,0,2">
-                <CheckBox Content="Exif情報を読み込む（テンプレートで未使用の場合も読み込む）"
+                <CheckBox Content="テンプレートで未使用の場合もExif情報を読み込む"
                           IsChecked="{Binding ReadExifInformation}" Margin="0,0,0,8" />
                 <CheckBox Content="Exif キャッシュを利用する"
                           IsChecked="{Binding UseExifCache}" />
@@ -171,7 +224,7 @@
                                Margin="0,5,0,0" TextWrapping="Wrap" Foreground="DimGray" />
                 </StackPanel>
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel>
+                    <StackPanel Grid.IsSharedSizeScope="True">
                         <GroupBox Header="ファイルシステム系" Margin="0,0,0,12">
                             <ItemsControl ItemsSource="{Binding FileSystemTokenDetails}"
                                           ItemTemplate="{StaticResource TokenDetailTemplate}" Margin="10,4" />
