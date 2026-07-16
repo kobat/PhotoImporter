@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace PhotoImporter.Core.Templates
@@ -16,13 +17,31 @@ namespace PhotoImporter.Core.Templates
                 ["SourceRelativeDirectory"] = TemplateTokenKind.SourceRelativeDirectory,
                 ["ModifiedDate"] = TemplateTokenKind.ModifiedDate,
                 ["FileSize"] = TemplateTokenKind.FileSize,
+                ["Protected"] = TemplateTokenKind.Protected,
                 ["Sequence"] = TemplateTokenKind.Sequence,
                 ["TakenDate"] = TemplateTokenKind.TakenDate,
                 ["TakenDateLocal"] = TemplateTokenKind.TakenDateLocal,
                 ["TakenDateInTimeZone"] = TemplateTokenKind.TakenDateInTimeZone,
                 ["CameraMake"] = TemplateTokenKind.CameraMake,
                 ["CameraModel"] = TemplateTokenKind.CameraModel,
-                ["Lens"] = TemplateTokenKind.Lens
+                ["CameraSerial"] = TemplateTokenKind.CameraSerial,
+                ["Lens"] = TemplateTokenKind.Lens,
+                ["Width"] = TemplateTokenKind.Width,
+                ["Height"] = TemplateTokenKind.Height,
+                ["ExifWidth"] = TemplateTokenKind.ExifWidth,
+                ["ExifHeight"] = TemplateTokenKind.ExifHeight,
+                ["Orientation"] = TemplateTokenKind.Orientation,
+                ["Aperture"] = TemplateTokenKind.Aperture,
+                ["ShutterSpeed"] = TemplateTokenKind.ShutterSpeed,
+                ["ExposureTime"] = TemplateTokenKind.ExposureTime,
+                ["Iso"] = TemplateTokenKind.Iso,
+                ["FocalLength"] = TemplateTokenKind.FocalLength,
+                ["FocalLength35mm"] = TemplateTokenKind.FocalLength35mm,
+                ["Rating"] = TemplateTokenKind.Rating,
+                ["HasGps"] = TemplateTokenKind.HasGps,
+                ["GpsLatitude"] = TemplateTokenKind.GpsLatitude,
+                ["GpsLongitude"] = TemplateTokenKind.GpsLongitude,
+                ["GpsAltitude"] = TemplateTokenKind.GpsAltitude
             };
 
         public static TemplateParseResult Parse(string source)
@@ -100,7 +119,7 @@ namespace PhotoImporter.Core.Templates
                     sequenceWidth = format == null ? 3 : int.Parse(format, CultureInfo.InvariantCulture);
                 }
 
-                if (token >= TemplateTokenKind.TakenDate)
+                if (IsExifToken(token))
                     requiresExif = true;
 
                 parts.Add(TemplatePart.ForToken(token, format, index));
@@ -164,9 +183,45 @@ namespace PhotoImporter.Core.Templates
                 return true;
             }
 
+            if (token == TemplateTokenKind.ShutterSpeed)
+            {
+                if (format != null && format != "1-250s" && format != "1-250" &&
+                    format != "1_250s" && format != "1_250")
+                {
+                    error = new TemplateError(TemplateErrorCode.InvalidNumberFormat, position, length, token.ToString());
+                    return false;
+                }
+                return true;
+            }
+
+            if (token == TemplateTokenKind.GpsLatitude || token == TemplateTokenKind.GpsLongitude)
+            {
+                if (format != null && format != "dms" && format != "dm")
+                {
+                    error = new TemplateError(TemplateErrorCode.InvalidNumberFormat, position, length, token.ToString());
+                    return false;
+                }
+                return true;
+            }
+
             var isDate = token == TemplateTokenKind.ModifiedDate ||
                          token == TemplateTokenKind.TakenDate ||
                          token == TemplateTokenKind.TakenDateLocal;
+            if (format != null && IsNumberToken(token))
+            {
+                try
+                {
+                    IFormattable sample = IsIntegerNumberToken(token) ? (IFormattable)123 : 1.25m;
+                    var formatted = sample.ToString(format, CultureInfo.InvariantCulture);
+                    if (formatted.Any(IsInvalidLiteral)) throw new FormatException();
+                }
+                catch (FormatException)
+                {
+                    error = new TemplateError(TemplateErrorCode.InvalidNumberFormat, position, length, token.ToString());
+                    return false;
+                }
+                return true;
+            }
             if (format != null && !isDate)
             {
                 error = new TemplateError(TemplateErrorCode.FormatNotSupported, position, length, token.ToString());
@@ -181,6 +236,53 @@ namespace PhotoImporter.Core.Templates
 
             return true;
         }
+
+        private static bool IsExifToken(TemplateTokenKind token)
+        {
+            switch (token)
+            {
+                case TemplateTokenKind.TakenDate:
+                case TemplateTokenKind.TakenDateLocal:
+                case TemplateTokenKind.TakenDateInTimeZone:
+                case TemplateTokenKind.CameraMake:
+                case TemplateTokenKind.CameraModel:
+                case TemplateTokenKind.CameraSerial:
+                case TemplateTokenKind.Lens:
+                case TemplateTokenKind.Width:
+                case TemplateTokenKind.Height:
+                case TemplateTokenKind.ExifWidth:
+                case TemplateTokenKind.ExifHeight:
+                case TemplateTokenKind.Orientation:
+                case TemplateTokenKind.Aperture:
+                case TemplateTokenKind.ShutterSpeed:
+                case TemplateTokenKind.ExposureTime:
+                case TemplateTokenKind.Iso:
+                case TemplateTokenKind.FocalLength:
+                case TemplateTokenKind.FocalLength35mm:
+                case TemplateTokenKind.Rating:
+                case TemplateTokenKind.HasGps:
+                case TemplateTokenKind.GpsLatitude:
+                case TemplateTokenKind.GpsLongitude:
+                case TemplateTokenKind.GpsAltitude:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsNumberToken(TemplateTokenKind token) =>
+            token == TemplateTokenKind.Width || token == TemplateTokenKind.Height ||
+            token == TemplateTokenKind.ExifWidth || token == TemplateTokenKind.ExifHeight ||
+            token == TemplateTokenKind.Orientation || token == TemplateTokenKind.Aperture ||
+            token == TemplateTokenKind.ExposureTime || token == TemplateTokenKind.Iso ||
+            token == TemplateTokenKind.FocalLength || token == TemplateTokenKind.FocalLength35mm ||
+            token == TemplateTokenKind.Rating || token == TemplateTokenKind.GpsAltitude;
+
+        private static bool IsIntegerNumberToken(TemplateTokenKind token) =>
+            token == TemplateTokenKind.Width || token == TemplateTokenKind.Height ||
+            token == TemplateTokenKind.ExifWidth || token == TemplateTokenKind.ExifHeight ||
+            token == TemplateTokenKind.Orientation || token == TemplateTokenKind.Iso ||
+            token == TemplateTokenKind.FocalLength35mm || token == TemplateTokenKind.Rating;
 
         private static bool IsInvalidLiteral(char value) =>
             value < 32 || value == '<' || value == '>' || value == ':' || value == '"' ||

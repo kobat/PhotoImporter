@@ -14,6 +14,7 @@ namespace PhotoImporter.Core.Templates
         InvalidSequenceWidth,
         InvalidSourceRelativeDirectoryDepth,
         InvalidDateFormat,
+        InvalidNumberFormat,
         TimeZoneArgumentMissing,
         InvalidTimeZoneCode,
         InvalidUtcOffset,

@@ -19,7 +19,8 @@ namespace PhotoImporter.Core.Templates
             PhotoMetadata metadata = null,
             DateTime? modifiedDateUtc = null,
             DateTime? exifSourceModifiedDate = null,
-            DateTime? exifSourceModifiedDateUtc = null)
+            DateTime? exifSourceModifiedDateUtc = null,
+            bool isReadOnly = false)
         {
             if (originalName == null) throw new ArgumentNullException(nameof(originalName));
             if (fileSize < 0) throw new ArgumentOutOfRangeException(nameof(fileSize));
@@ -29,6 +30,7 @@ namespace PhotoImporter.Core.Templates
             FileSize = fileSize;
             SourceRelativeDirectory = sourceRelativeDirectory;
             Metadata = metadata ?? PhotoMetadata.Empty;
+            IsReadOnly = isReadOnly;
             ModifiedDateUtc = modifiedDateUtc ?? (modifiedDate.Kind == DateTimeKind.Utc
                 ? modifiedDate
                 : modifiedDate.ToUniversalTime());
@@ -48,6 +50,7 @@ namespace PhotoImporter.Core.Templates
         public DateTime ModifiedDateUtc { get; }
         public DateTime ExifSourceModifiedDate { get; }
         public DateTime ExifSourceModifiedDateUtc { get; }
+        public bool IsReadOnly { get; }
     }
 
     public enum TemplateWarningCode
@@ -141,6 +144,9 @@ namespace PhotoImporter.Core.Templates
                     case TemplateTokenKind.FileSize:
                         output.Append(context.FileSize.ToString(CultureInfo.InvariantCulture));
                         break;
+                    case TemplateTokenKind.Protected:
+                        output.Append(context.IsReadOnly ? "Protected" : "Unprotected");
+                        break;
                     case TemplateTokenKind.Sequence:
                         if (sequenceNumber.HasValue)
                         {
@@ -168,8 +174,76 @@ namespace PhotoImporter.Core.Templates
                     case TemplateTokenKind.CameraModel:
                         output.Append(SanitizePathElement(context.Metadata.CameraModel));
                         break;
+                    case TemplateTokenKind.CameraSerial:
+                        output.Append(SanitizePathElement(context.Metadata.CameraSerial));
+                        break;
                     case TemplateTokenKind.Lens:
                         output.Append(SanitizePathElement(context.Metadata.Lens));
+                        break;
+                    case TemplateTokenKind.Width:
+                    case TemplateTokenKind.Height:
+                        int? orientedWidth;
+                        int? orientedHeight;
+                        GetOrientedDimensions(context.Metadata, out orientedWidth, out orientedHeight);
+                        output.Append(FormatOptionalNumber(
+                            part.Token.Value == TemplateTokenKind.Width ? orientedWidth : orientedHeight,
+                            part.Format, part));
+                        break;
+                    case TemplateTokenKind.ExifWidth:
+                        output.Append(FormatOptionalNumber(context.Metadata.ExifWidth, part.Format, part));
+                        break;
+                    case TemplateTokenKind.ExifHeight:
+                        output.Append(FormatOptionalNumber(context.Metadata.ExifHeight, part.Format, part));
+                        break;
+                    case TemplateTokenKind.Orientation:
+                        output.Append(FormatOptionalNumber(context.Metadata.Orientation, part.Format, part));
+                        break;
+                    case TemplateTokenKind.Aperture:
+                        output.Append(context.Metadata.FNumber.HasValue
+                            ? part.Format == null
+                                ? "F" + FormatDecimal(context.Metadata.FNumber.Value)
+                                : FormatNumber(context.Metadata.FNumber.Value, part.Format, part)
+                            : "Unknown");
+                        break;
+                    case TemplateTokenKind.ShutterSpeed:
+                        output.Append(FormatShutterSpeed(context.Metadata.ExposureTime, part.Format));
+                        break;
+                    case TemplateTokenKind.ExposureTime:
+                        output.Append(context.Metadata.ExposureTime.HasValue
+                            ? part.Format == null
+                                ? FormatDecimal(context.Metadata.ExposureTime.Value.ToDecimal())
+                                : FormatNumber(context.Metadata.ExposureTime.Value.ToDecimal(), part.Format, part)
+                            : "Unknown");
+                        break;
+                    case TemplateTokenKind.Iso:
+                        output.Append(FormatOptionalNumber(context.Metadata.Iso, part.Format, part));
+                        break;
+                    case TemplateTokenKind.FocalLength:
+                        output.Append(FormatUnitNumber(context.Metadata.FocalLength, part.Format, "mm", part));
+                        break;
+                    case TemplateTokenKind.FocalLength35mm:
+                        output.Append(context.Metadata.FocalLength35mm.HasValue
+                            ? part.Format == null
+                                ? context.Metadata.FocalLength35mm.Value.ToString(CultureInfo.InvariantCulture) + "mm"
+                                : FormatNumber(context.Metadata.FocalLength35mm.Value, part.Format, part)
+                            : "Unknown");
+                        break;
+                    case TemplateTokenKind.Rating:
+                        output.Append(context.Metadata.Rating == -1
+                            ? "Rejected"
+                            : FormatOptionalNumber(context.Metadata.Rating, part.Format, part));
+                        break;
+                    case TemplateTokenKind.HasGps:
+                        output.Append(context.Metadata.HasGps ? "GPS" : "NoGPS");
+                        break;
+                    case TemplateTokenKind.GpsLatitude:
+                        output.Append(FormatGpsCoordinate(context.Metadata.GpsLatitude, true, part.Format));
+                        break;
+                    case TemplateTokenKind.GpsLongitude:
+                        output.Append(FormatGpsCoordinate(context.Metadata.GpsLongitude, false, part.Format));
+                        break;
+                    case TemplateTokenKind.GpsAltitude:
+                        output.Append(FormatUnitNumber(context.Metadata.GpsAltitude, part.Format, "m", part));
                         break;
                 }
             }
@@ -254,6 +328,124 @@ namespace PhotoImporter.Core.Templates
             if (ReservedDeviceName.IsMatch(sanitized)) sanitized = "_" + sanitized;
             return sanitized;
         }
+
+        private static void GetOrientedDimensions(PhotoMetadata metadata, out int? width, out int? height)
+        {
+            if (metadata.DecodedWidth.HasValue && metadata.DecodedHeight.HasValue)
+            {
+                width = metadata.DecodedWidth;
+                height = metadata.DecodedHeight;
+            }
+            else if (metadata.ExifWidth.HasValue && metadata.ExifHeight.HasValue)
+            {
+                width = metadata.ExifWidth;
+                height = metadata.ExifHeight;
+            }
+            else
+            {
+                width = null;
+                height = null;
+                return;
+            }
+
+            if (metadata.Orientation >= 5 && metadata.Orientation <= 8)
+            {
+                var temporary = width;
+                width = height;
+                height = temporary;
+            }
+        }
+
+        private static string FormatOptionalNumber<T>(T? value, string format, TemplatePart part)
+            where T : struct, IFormattable =>
+            value.HasValue ? FormatNumber(value.Value, format, part) : "Unknown";
+
+        private static string FormatNumber(IFormattable value, string format, TemplatePart part)
+        {
+            try
+            {
+                var result = value.ToString(format, CultureInfo.InvariantCulture);
+                if (result.Any(IsInvalidPathCharacter)) Throw(TemplateErrorCode.InvalidNumberFormat, part);
+                return result;
+            }
+            catch (FormatException)
+            {
+                Throw(TemplateErrorCode.InvalidNumberFormat, part);
+                return null;
+            }
+        }
+
+        private static string FormatUnitNumber(decimal? value, string format, string unit, TemplatePart part)
+        {
+            if (!value.HasValue) return "Unknown";
+            return format == null
+                ? FormatDecimal(value.Value) + unit
+                : FormatNumber(value.Value, format, part);
+        }
+
+        private static string FormatDecimal(decimal value) =>
+            value.ToString("0.######", CultureInfo.InvariantCulture);
+
+        private static string FormatShutterSpeed(ExifRational? exposureTime, string format)
+        {
+            if (!exposureTime.HasValue) return "Unknown";
+            var selectedFormat = format ?? "1-250s";
+            var includeUnit = selectedFormat.EndsWith("s", StringComparison.Ordinal);
+            string value;
+            if (exposureTime.Value.Numerator == 1)
+            {
+                var separator = selectedFormat.IndexOf('_') >= 0 ? '_' : '-';
+                value = "1" + separator + exposureTime.Value.Denominator.ToString(CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                value = FormatDecimal(exposureTime.Value.ToDecimal());
+            }
+            return includeUnit ? value + "s" : value;
+        }
+
+        private static string FormatGpsCoordinate(decimal? coordinate, bool latitude, string format)
+        {
+            if (!coordinate.HasValue) return "Unknown";
+            if (format == null) return coordinate.Value.ToString("0.000000", CultureInfo.InvariantCulture);
+
+            var absolute = Math.Abs(coordinate.Value);
+            var degrees = decimal.Truncate(absolute);
+            var minutesWithFraction = (absolute - degrees) * 60m;
+            var hemisphere = latitude
+                ? (coordinate.Value < 0 ? "S" : "N")
+                : (coordinate.Value < 0 ? "W" : "E");
+            if (format == "dm")
+            {
+                minutesWithFraction = Math.Round(minutesWithFraction, 3, MidpointRounding.AwayFromZero);
+                if (minutesWithFraction >= 60m)
+                {
+                    degrees++;
+                    minutesWithFraction = 0m;
+                }
+                return degrees.ToString("0", CultureInfo.InvariantCulture) + "-" +
+                       minutesWithFraction.ToString("00.000", CultureInfo.InvariantCulture) + hemisphere;
+            }
+
+            var minutes = decimal.Truncate(minutesWithFraction);
+            var seconds = Math.Round((minutesWithFraction - minutes) * 60m, 1, MidpointRounding.AwayFromZero);
+            if (seconds >= 60m)
+            {
+                seconds = 0m;
+                minutes++;
+                if (minutes >= 60m)
+                {
+                    minutes = 0m;
+                    degrees++;
+                }
+            }
+            return degrees.ToString("0", CultureInfo.InvariantCulture) + "-" +
+                   minutes.ToString("00", CultureInfo.InvariantCulture) + "-" +
+                   seconds.ToString("00.0", CultureInfo.InvariantCulture) + hemisphere;
+        }
+
+        private static bool IsInvalidPathCharacter(char character) =>
+            character < 32 || "<>:\"/\\|?*".IndexOf(character) >= 0;
 
         private static string SelectSourceRelativeDirectory(string relativeDirectory, string depthFormat)
         {

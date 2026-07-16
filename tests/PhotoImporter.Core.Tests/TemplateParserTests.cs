@@ -43,6 +43,24 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal("2", result.Template.Parts[0].Format);
         }
 
+        [Fact]
+        public void ProtectedDoesNotRequireExifButExtendedTokensDo()
+        {
+            Assert.False(TemplateParser.Parse("{Protected}").Template.RequiresExif);
+            Assert.True(TemplateParser.Parse("{Width}_{HasGps}_{CameraSerial}").Template.RequiresExif);
+        }
+
+        [Theory]
+        [InlineData("{Width:D5}")]
+        [InlineData("{Aperture:0.0}")]
+        [InlineData("{ExposureTime:0.000000}")]
+        [InlineData("{ShutterSpeed:1_250}")]
+        [InlineData("{GpsLatitude:dms}")]
+        public void AcceptsExtendedFormats(string source)
+        {
+            Assert.True(TemplateParser.Parse(source).IsValid);
+        }
+
         [Theory]
         [InlineData("", TemplateErrorCode.TemplateEmpty)]
         [InlineData("{Unknown}", TemplateErrorCode.UnknownToken)]
@@ -62,6 +80,10 @@ namespace PhotoImporter.Core.Tests
         [InlineData("{TakenDateInTimeZone:XYZ}", TemplateErrorCode.InvalidTimeZoneCode)]
         [InlineData("{TakenDateInTimeZone:UTC+15}", TemplateErrorCode.InvalidUtcOffset)]
         [InlineData("{TakenDateInTimeZone:UTC+9|}", TemplateErrorCode.InvalidDateFormat)]
+        [InlineData("{Protected:x}", TemplateErrorCode.FormatNotSupported)]
+        [InlineData("{Aperture:D5}", TemplateErrorCode.InvalidNumberFormat)]
+        [InlineData("{ShutterSpeed:1/250}", TemplateErrorCode.InvalidNumberFormat)]
+        [InlineData("{GpsLatitude:D6}", TemplateErrorCode.InvalidNumberFormat)]
         [InlineData("folder/file.jpg", TemplateErrorCode.InvalidLiteralCharacter)]
         public void ReturnsStructuredErrors(string source, TemplateErrorCode expected)
         {

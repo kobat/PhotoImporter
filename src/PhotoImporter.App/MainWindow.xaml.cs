@@ -411,7 +411,8 @@ namespace PhotoImporter.App
                             metadata,
                             info.LastWriteTimeUtc,
                             analysisSourceInfo.LastWriteTime,
-                            analysisSourceInfo.LastWriteTimeUtc),
+                            analysisSourceInfo.LastWriteTimeUtc,
+                            (info.Attributes & FileAttributes.ReadOnly) != 0),
                         info.LastWriteTimeUtc);
                     var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
                     var plan = allocation.Status == DestinationStatus.NotImported ||

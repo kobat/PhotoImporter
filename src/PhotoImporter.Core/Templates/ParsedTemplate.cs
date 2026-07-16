@@ -11,13 +11,31 @@ namespace PhotoImporter.Core.Templates
         SourceRelativeDirectory,
         ModifiedDate,
         FileSize,
+        Protected,
         Sequence,
         TakenDate,
         TakenDateLocal,
         TakenDateInTimeZone,
         CameraMake,
         CameraModel,
-        Lens
+        CameraSerial,
+        Lens,
+        Width,
+        Height,
+        ExifWidth,
+        ExifHeight,
+        Orientation,
+        Aperture,
+        ShutterSpeed,
+        ExposureTime,
+        Iso,
+        FocalLength,
+        FocalLength35mm,
+        Rating,
+        HasGps,
+        GpsLatitude,
+        GpsLongitude,
+        GpsAltitude
     }
 
     public sealed class TemplatePart

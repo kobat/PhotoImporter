@@ -62,6 +62,7 @@ dotnet test .\PhotoImporter.sln
 - `{SourceRelativeDirectory}`
 - `{ModifiedDate}`
 - `{FileSize}`
+- `{Protected}`
 - `{Sequence}`
 
 Exif系のトークン:
@@ -71,9 +72,16 @@ Exif系のトークン:
 - `{TakenDateInTimeZone:JST|yyyy-MM-dd}`
 - `{CameraMake}`
 - `{CameraModel}`
+- `{CameraSerial}`
 - `{Lens}`
+- `{Width}` / `{Height}`
+- `{ExifWidth}` / `{ExifHeight}` / `{Orientation}`
+- `{Aperture}` / `{ShutterSpeed}` / `{ExposureTime}` / `{Iso}`
+- `{FocalLength}` / `{FocalLength35mm}`
+- `{Rating}`
+- `{HasGps}` / `{GpsLatitude}` / `{GpsLongitude}` / `{GpsAltitude}`
 
-Exifに撮影日時がない場合はファイルの更新日時を使用し、プレビューの状態欄に警告を表示します。
+Exifに撮影日時がない場合はファイルの更新日時を使用し、プレビューの状態欄に警告を表示します。数値トークンは `D5`、`000`、`0.0` などのInvariant Culture数値書式に対応します。`{Protected}` はExifではなく、スキャン時の読み取り専用属性から評価します。
 
 ## RAW+JPEGペア解析
 
@@ -104,7 +112,7 @@ JPEGのみ解析する設定ではJPEGキャッシュを情報源とします。
 
 ## 現在の制限
 
-- Exifを使うスキャンでは、設定中の保存先にボリューム別の人間可読な `entries.tsv` キャッシュを保存します。2回目以降は一致するファイルの解析を省略し、進捗にキャッシュヒット数を表示します。途中停止した場合も、現在読み取り中の1ファイルを完了して解析済み結果を保存します。旧 `entries.json` は初回利用時に自動移行します。読取中に変更されたファイルはエラーとし、キャッシュ障害時は警告を表示して直接解析を続けます。`meta.json`、以前の保存先を含むカード管理画面、縮小版は未実装です。
+- Exifを使うスキャンでは、設定中の保存先にボリューム別の人間可読な `entries.tsv` キャッシュを保存します。2回目以降は一致するファイルの解析を省略し、進捗にキャッシュヒット数を表示します。途中停止した場合も、現在読み取り中の1ファイルを完了して解析済み結果を保存します。Exif拡張前のSchema/抽出仕様バージョンは互換性なしとして再生成します。読取中に変更されたファイルはエラーとし、キャッシュ障害時は警告を表示して直接解析を続けます。`meta.json`、以前の保存先を含むカード管理画面、縮小版は未実装です。
 - UIは現在、日本語のみです。
 - 状態による一覧フィルターは未実装です。
 - 残存する `.partial` ファイルの起動時検出と復旧案内UIは未実装です。

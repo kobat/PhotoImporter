@@ -13,8 +13,8 @@ namespace PhotoImporter.Core.Metadata
 {
     public sealed class ExifCacheStore
     {
-        public const int EntriesSchemaVersion = 2;
-        public const int ExtractionVersion = 1;
+        public const int EntriesSchemaVersion = 3;
+        public const int ExtractionVersion = 2;
         internal const int LegacyEntriesSchemaVersion = 1;
         internal const string EntriesFileName = "entries.tsv";
         internal const string LegacyEntriesFileName = "entries.json";
@@ -274,7 +274,10 @@ namespace PhotoImporter.Core.Metadata
         private static readonly string[] ColumnNames =
         {
             "RelativePath", "FileSize", "LastWriteTimeUtc", "LastUsedUtcDate", "Status",
-            "TakenDate", "Offset", "OffsetState", "CameraMake", "CameraModel", "Lens"
+            "TakenDate", "Offset", "OffsetState", "CameraMake", "CameraModel", "CameraSerial", "Lens",
+            "DecodedWidth", "DecodedHeight", "ExifWidth", "ExifHeight", "Orientation", "FNumber",
+            "ExposureTime", "Iso", "FocalLength", "FocalLength35mm", "Rating",
+            "GpsLatitude", "GpsLongitude", "GpsAltitude"
         };
 
         private const string DocumentMarker = "# PhotoImporter Exif Cache";
@@ -360,6 +363,35 @@ namespace PhotoImporter.Core.Metadata
                 offsetTicks = offset.Ticks;
             }
 
+            int? decodedWidth;
+            int? decodedHeight;
+            int? exifWidth;
+            int? exifHeight;
+            int? orientation;
+            decimal? fNumber;
+            ExifRational? exposureTime;
+            int? iso;
+            decimal? focalLength;
+            int? focalLength35mm;
+            int? rating;
+            decimal? gpsLatitude;
+            decimal? gpsLongitude;
+            decimal? gpsAltitude;
+            if (!TryParseNullableInt(fields[12], out decodedWidth) ||
+                !TryParseNullableInt(fields[13], out decodedHeight) ||
+                !TryParseNullableInt(fields[14], out exifWidth) ||
+                !TryParseNullableInt(fields[15], out exifHeight) ||
+                !TryParseNullableInt(fields[16], out orientation) ||
+                !TryParseNullableDecimal(fields[17], out fNumber) ||
+                !TryParseNullableRational(fields[18], out exposureTime) ||
+                !TryParseNullableInt(fields[19], out iso) ||
+                !TryParseNullableDecimal(fields[20], out focalLength) ||
+                !TryParseNullableInt(fields[21], out focalLength35mm) ||
+                !TryParseNullableInt(fields[22], out rating) ||
+                !TryParseNullableDecimal(fields[23], out gpsLatitude) ||
+                !TryParseNullableDecimal(fields[24], out gpsLongitude) ||
+                !TryParseNullableDecimal(fields[25], out gpsAltitude)) return false;
+
             entry = new CacheEntryData
             {
                 RelativePath = fields[0],
@@ -373,9 +405,69 @@ namespace PhotoImporter.Core.Metadata
                 OffsetState = (int)offsetState,
                 CameraMake = EmptyToNull(fields[8]),
                 CameraModel = EmptyToNull(fields[9]),
-                Lens = EmptyToNull(fields[10])
+                CameraSerial = EmptyToNull(fields[10]),
+                Lens = EmptyToNull(fields[11]),
+                DecodedWidth = decodedWidth,
+                DecodedHeight = decodedHeight,
+                ExifWidth = exifWidth,
+                ExifHeight = exifHeight,
+                Orientation = orientation,
+                FNumber = fNumber,
+                ExposureNumerator = exposureTime?.Numerator,
+                ExposureDenominator = exposureTime?.Denominator,
+                Iso = iso,
+                FocalLength = focalLength,
+                FocalLength35mm = focalLength35mm,
+                Rating = rating,
+                GpsLatitude = gpsLatitude,
+                GpsLongitude = gpsLongitude,
+                GpsAltitude = gpsAltitude
             };
+            entry.NormalizeGps();
             return true;
+        }
+
+        private static bool TryParseNullableInt(string value, out int? result)
+        {
+            result = null;
+            if (value.Length == 0) return true;
+            int parsed;
+            if (!int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out parsed)) return false;
+            result = parsed;
+            return true;
+        }
+
+        private static bool TryParseNullableDecimal(string value, out decimal? result)
+        {
+            result = null;
+            if (value.Length == 0) return true;
+            decimal parsed;
+            if (!decimal.TryParse(value, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out parsed)) return false;
+            result = parsed;
+            return true;
+        }
+
+        private static bool TryParseNullableRational(string value, out ExifRational? result)
+        {
+            result = null;
+            if (value.Length == 0) return true;
+            var slash = value.IndexOf('/');
+            long numerator;
+            long denominator;
+            if (slash <= 0 || slash != value.LastIndexOf('/') ||
+                !long.TryParse(value.Substring(0, slash), NumberStyles.Integer, CultureInfo.InvariantCulture, out numerator) ||
+                !long.TryParse(value.Substring(slash + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out denominator) ||
+                denominator == 0) return false;
+            try
+            {
+                result = new ExifRational(numerator, denominator);
+                return true;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
         }
 
         private static void WriteAtomically(string destinationPath, IEnumerable<CacheEntryData> entries)
@@ -432,10 +524,30 @@ namespace PhotoImporter.Core.Metadata
                 ((TakenDateOffsetState)entry.OffsetState).ToString(),
                 entry.CameraMake ?? string.Empty,
                 entry.CameraModel ?? string.Empty,
-                entry.Lens ?? string.Empty
+                entry.CameraSerial ?? string.Empty,
+                entry.Lens ?? string.Empty,
+                FormatNullable(entry.DecodedWidth),
+                FormatNullable(entry.DecodedHeight),
+                FormatNullable(entry.ExifWidth),
+                FormatNullable(entry.ExifHeight),
+                FormatNullable(entry.Orientation),
+                FormatNullable(entry.FNumber),
+                entry.ExposureNumerator.HasValue && entry.ExposureDenominator.HasValue
+                    ? new ExifRational(entry.ExposureNumerator.Value, entry.ExposureDenominator.Value).ToString()
+                    : string.Empty,
+                FormatNullable(entry.Iso),
+                FormatNullable(entry.FocalLength),
+                FormatNullable(entry.FocalLength35mm),
+                FormatNullable(entry.Rating),
+                FormatNullable(entry.GpsLatitude),
+                FormatNullable(entry.GpsLongitude),
+                FormatNullable(entry.GpsAltitude)
             };
             writer.WriteLine(string.Join("\t", fields.Select(EscapeTsvField)));
         }
+
+        private static string FormatNullable<T>(T? value) where T : struct, IFormattable =>
+            value.HasValue ? value.Value.ToString(null, CultureInfo.InvariantCulture) : string.Empty;
 
         private static string EscapeTsvField(string value)
         {
@@ -609,6 +721,22 @@ namespace PhotoImporter.Core.Metadata
         [DataMember(Order = 10, EmitDefaultValue = false)] public string CameraMake { get; set; }
         [DataMember(Order = 11, EmitDefaultValue = false)] public string CameraModel { get; set; }
         [DataMember(Order = 12, EmitDefaultValue = false)] public string Lens { get; set; }
+        [DataMember(Order = 13, EmitDefaultValue = false)] public string CameraSerial { get; set; }
+        [DataMember(Order = 14, EmitDefaultValue = false)] public int? DecodedWidth { get; set; }
+        [DataMember(Order = 15, EmitDefaultValue = false)] public int? DecodedHeight { get; set; }
+        [DataMember(Order = 16, EmitDefaultValue = false)] public int? ExifWidth { get; set; }
+        [DataMember(Order = 17, EmitDefaultValue = false)] public int? ExifHeight { get; set; }
+        [DataMember(Order = 18, EmitDefaultValue = false)] public int? Orientation { get; set; }
+        [DataMember(Order = 19, EmitDefaultValue = false)] public decimal? FNumber { get; set; }
+        [DataMember(Order = 20, EmitDefaultValue = false)] public long? ExposureNumerator { get; set; }
+        [DataMember(Order = 21, EmitDefaultValue = false)] public long? ExposureDenominator { get; set; }
+        [DataMember(Order = 22, EmitDefaultValue = false)] public int? Iso { get; set; }
+        [DataMember(Order = 23, EmitDefaultValue = false)] public decimal? FocalLength { get; set; }
+        [DataMember(Order = 24, EmitDefaultValue = false)] public int? FocalLength35mm { get; set; }
+        [DataMember(Order = 25, EmitDefaultValue = false)] public int? Rating { get; set; }
+        [DataMember(Order = 26, EmitDefaultValue = false)] public decimal? GpsLatitude { get; set; }
+        [DataMember(Order = 27, EmitDefaultValue = false)] public decimal? GpsLongitude { get; set; }
+        [DataMember(Order = 28, EmitDefaultValue = false)] public decimal? GpsAltitude { get; set; }
 
         public CacheIdentity Identity => new CacheIdentity
         {
@@ -636,12 +764,29 @@ namespace PhotoImporter.Core.Metadata
                 OffsetState = (int)metadata.OffsetState,
                 CameraMake = metadata.CameraMake,
                 CameraModel = metadata.CameraModel,
-                Lens = metadata.Lens
+                Lens = metadata.Lens,
+                CameraSerial = metadata.CameraSerial,
+                DecodedWidth = metadata.DecodedWidth,
+                DecodedHeight = metadata.DecodedHeight,
+                ExifWidth = metadata.ExifWidth,
+                ExifHeight = metadata.ExifHeight,
+                Orientation = metadata.Orientation,
+                FNumber = metadata.FNumber,
+                ExposureNumerator = metadata.ExposureTime?.Numerator,
+                ExposureDenominator = metadata.ExposureTime?.Denominator,
+                Iso = metadata.Iso,
+                FocalLength = metadata.FocalLength,
+                FocalLength35mm = metadata.FocalLength35mm,
+                Rating = metadata.Rating,
+                GpsLatitude = metadata.GpsLatitude,
+                GpsLongitude = metadata.GpsLongitude,
+                GpsAltitude = metadata.GpsAltitude
             };
         }
 
         public bool IsValid()
         {
+            NormalizeGps();
             if (string.IsNullOrWhiteSpace(RelativePath) || string.IsNullOrWhiteSpace(ComparisonPath) ||
                 FileSize < 0 || LastWriteTimeUtcTicks < DateTime.MinValue.Ticks ||
                 LastWriteTimeUtcTicks > DateTime.MaxValue.Ticks ||
@@ -653,6 +798,14 @@ namespace PhotoImporter.Core.Metadata
                 (TakenDateTicks.Value < DateTime.MinValue.Ticks || TakenDateTicks.Value > DateTime.MaxValue.Ticks)) return false;
             if (OffsetTicks.HasValue && (OffsetTicks.Value < TimeSpan.MinValue.Ticks || OffsetTicks.Value > TimeSpan.MaxValue.Ticks)) return false;
             if ((TakenDateOffsetState)OffsetState == TakenDateOffsetState.Valid && !OffsetTicks.HasValue) return false;
+            if ((DecodedWidth.HasValue && DecodedWidth <= 0) || (DecodedHeight.HasValue && DecodedHeight <= 0) ||
+                (ExifWidth.HasValue && ExifWidth <= 0) || (ExifHeight.HasValue && ExifHeight <= 0) ||
+                (Orientation.HasValue && (Orientation < 1 || Orientation > 8)) ||
+                (FNumber.HasValue && FNumber <= 0) || (Iso.HasValue && Iso <= 0) ||
+                (FocalLength.HasValue && FocalLength <= 0) || (FocalLength35mm.HasValue && FocalLength35mm <= 0) ||
+                (Rating.HasValue && (Rating < -1 || Rating > 5 || Rating == 0)) ||
+                ExposureNumerator.HasValue != ExposureDenominator.HasValue ||
+                (ExposureNumerator.HasValue && (ExposureNumerator <= 0 || ExposureDenominator <= 0))) return false;
 
             var metadata = CreateMetadata();
             return Status == (int)PhotoMetadataReadStatus.Success ? metadata.HasValues : !metadata.HasValues;
@@ -666,12 +819,40 @@ namespace PhotoImporter.Core.Metadata
             return PhotoMetadataReadResult.Unsupported();
         }
 
+        internal void NormalizeGps()
+        {
+            var valid = GpsLatitude >= -90m && GpsLatitude <= 90m &&
+                        GpsLongitude >= -180m && GpsLongitude <= 180m &&
+                        !(GpsLatitude == 0m && GpsLongitude == 0m);
+            if (valid) return;
+            GpsLatitude = null;
+            GpsLongitude = null;
+            GpsAltitude = null;
+        }
+
         private PhotoMetadata CreateMetadata() => new PhotoMetadata(
             TakenDateTicks.HasValue ? new DateTime(TakenDateTicks.Value, DateTimeKind.Unspecified) : (DateTime?)null,
             OffsetTicks.HasValue ? TimeSpan.FromTicks(OffsetTicks.Value) : (TimeSpan?)null,
             (TakenDateOffsetState)OffsetState,
             CameraMake,
             CameraModel,
-            Lens);
+            Lens,
+            CameraSerial,
+            DecodedWidth,
+            DecodedHeight,
+            ExifWidth,
+            ExifHeight,
+            Orientation,
+            FNumber,
+            ExposureNumerator.HasValue
+                ? new ExifRational(ExposureNumerator.Value, ExposureDenominator.Value)
+                : (ExifRational?)null,
+            Iso,
+            FocalLength,
+            FocalLength35mm,
+            Rating,
+            GpsLatitude,
+            GpsLongitude,
+            GpsAltitude);
     }
 }

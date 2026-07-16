@@ -37,7 +37,7 @@ namespace PhotoImporter.Core.Tests
             var entriesPath = Path.Combine(store.CacheRoot, volume.SerialNumberHex, "entries.tsv");
             Assert.True(File.Exists(entriesPath));
             var tsv = File.ReadAllText(entriesPath);
-            Assert.Contains("# PhotoImporter Exif Cache\tSchemaVersion=2\tExtractionVersion=1", tsv);
+            Assert.Contains("# PhotoImporter Exif Cache\tSchemaVersion=3\tExtractionVersion=2", tsv);
             Assert.DoesNotContain("ComparisonPath", tsv);
             Assert.Contains("2026-07-14T12:34:56.0000000", tsv);
             Assert.Contains("\tSuccess\t", tsv);
@@ -57,6 +57,51 @@ namespace PhotoImporter.Core.Tests
                 Assert.Equal(PhotoMetadataReadStatus.NoMetadata, result.Status);
                 Assert.True(session.TryGet(unsupportedKey, Utc(2026, 7, 15), out result));
                 Assert.Equal(PhotoMetadataReadStatus.Unsupported, result.Status);
+            }
+        }
+
+        [Fact]
+        public void ExtendedExifValuesRoundTripThroughSchemaThreeTsv()
+        {
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var key = CreateKey(volume, "extended.jpg", 10);
+            var metadata = new PhotoMetadata(
+                new DateTime(2026, 7, 14, 12, 34, 56, 789),
+                TimeSpan.FromHours(9),
+                TakenDateOffsetState.Valid,
+                "Sony", "ILCE-1", "FE 35mm", "SERIAL-1",
+                6000, 4000, 6048, 4024, 6, 2.8m,
+                new ExifRational(2, 500), 100, 35.5m, 35, -1,
+                35.681236m, 139.767125m, -12.5m);
+            ExifCacheSession session;
+            string warning;
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+                session.Put(key, PhotoMetadataReadResult.Success(metadata), Utc(2026, 7, 14));
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+            {
+                PhotoMetadataReadResult result;
+                Assert.True(session.TryGet(key, Utc(2026, 7, 15), out result));
+                var actual = result.Metadata;
+                Assert.Equal("SERIAL-1", actual.CameraSerial);
+                Assert.Equal(6000, actual.DecodedWidth);
+                Assert.Equal(4000, actual.DecodedHeight);
+                Assert.Equal(6048, actual.ExifWidth);
+                Assert.Equal(4024, actual.ExifHeight);
+                Assert.Equal(6, actual.Orientation);
+                Assert.Equal(2.8m, actual.FNumber);
+                Assert.Equal(new ExifRational(1, 250), actual.ExposureTime);
+                Assert.Equal(100, actual.Iso);
+                Assert.Equal(35.5m, actual.FocalLength);
+                Assert.Equal(35, actual.FocalLength35mm);
+                Assert.Equal(-1, actual.Rating);
+                Assert.Equal(35.681236m, actual.GpsLatitude);
+                Assert.Equal(139.767125m, actual.GpsLongitude);
+                Assert.Equal(-12.5m, actual.GpsAltitude);
             }
         }
 
@@ -101,6 +146,30 @@ namespace PhotoImporter.Core.Tests
                 Assert.False(session.RecoveredFromInvalidFile);
                 Assert.Equal(1, session.Count);
             }
+        }
+
+        [Fact]
+        public void OldTsvSchemaAndExtractionVersionAreDiscarded()
+        {
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var volumeFolder = Path.Combine(store.CacheRoot, volume.SerialNumberHex);
+            Directory.CreateDirectory(volumeFolder);
+            File.WriteAllText(Path.Combine(volumeFolder, "entries.tsv"),
+                "# PhotoImporter Exif Cache\tSchemaVersion=2\tExtractionVersion=1\r\n" +
+                "RelativePath\tFileSize\tLastWriteTimeUtc\tLastUsedUtcDate\tStatus\tTakenDate\tOffset\tOffsetState\tCameraMake\tCameraModel\tLens\r\n");
+            ExifCacheSession session;
+            string warning;
+
+            Assert.True(store.TryOpen(volume, out session, out warning), warning);
+            using (session)
+            {
+                Assert.True(session.RecoveredFromInvalidFile);
+                Assert.Equal(0, session.Count);
+            }
+
+            Assert.Contains("SchemaVersion=3\tExtractionVersion=2",
+                File.ReadAllText(Path.Combine(volumeFolder, "entries.tsv")));
         }
 
         [Fact]
@@ -159,7 +228,7 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
-        public void LegacyJsonIsMigratedAfterSuccessfulOpen()
+        public void LegacyJsonFromOldExtractionVersionIsDiscarded()
         {
             var volume = CreateVolume();
             var store = new ExifCacheStore(Path.Combine(_root, "cache"));
@@ -177,11 +246,10 @@ namespace PhotoImporter.Core.Tests
             Assert.True(store.TryOpen(volume, out session, out warning), warning);
             using (session)
             {
-                Assert.False(session.RecoveredFromInvalidFile);
-                Assert.Equal(1, session.Count);
+                Assert.True(session.RecoveredFromInvalidFile);
+                Assert.Equal(0, session.Count);
                 PhotoMetadataReadResult result;
-                Assert.True(session.TryGet(CreateKey(volume, "legacy.jpg", 10), Utc(2026, 7, 14), out result));
-                Assert.Equal(PhotoMetadataReadStatus.NoMetadata, result.Status);
+                Assert.False(session.TryGet(CreateKey(volume, "legacy.jpg", 10), Utc(2026, 7, 14), out result));
             }
 
             Assert.True(File.Exists(Path.Combine(volumeFolder, "entries.tsv")));

@@ -193,6 +193,50 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal("photo_.ARW_200_12_13_13", result);
         }
 
+        [Fact]
+        public void EvaluatesProtectedWithoutExif()
+        {
+            var context = new FileTemplateContext(
+                "photo.jpg", Context.ModifiedDate, 10, isReadOnly: true);
+
+            Assert.Equal("Protected_photo.jpg", TemplateEvaluator.Evaluate(
+                Parse("{Protected}_{OriginalName}"), context));
+        }
+
+        [Fact]
+        public void EvaluatesExtendedExifTokensAndFormats()
+        {
+            var metadata = new PhotoMetadata(
+                null, null, TakenDateOffsetState.Missing,
+                null, null, null, "SERIAL-1",
+                6000, 4000, 6048, 4024, 6, 2.8m,
+                new ExifRational(1, 250), 100, 35.5m, 35, 4,
+                35.681236m, 139.767125m, -12.5m);
+            var context = new FileTemplateContext("photo.jpg", Context.ModifiedDate, 10, metadata: metadata);
+
+            var path = TemplateEvaluator.Evaluate(Parse(
+                "{CameraSerial}_{Width}x{Height}_{ExifWidth}x{ExifHeight}_{Orientation}_" +
+                "{Aperture}_{Aperture:0.00}_{ShutterSpeed}_{ShutterSpeed:1_250}_" +
+                "{ExposureTime}_{Iso:D4}_{FocalLength}_{FocalLength:0.0}_" +
+                "{FocalLength35mm}_{Rating}_{HasGps}_{GpsLatitude}_{GpsLatitude:dms}_" +
+                "{GpsLongitude:dm}_{GpsAltitude}"), context);
+
+            Assert.Equal(
+                "SERIAL-1_4000x6000_6048x4024_6_F2.8_2.80_1-250s_1_250_" +
+                "0.004_0100_35.5mm_35.5_35mm_4_GPS_35.681236_35-40-52.4N_" +
+                "139-46.028E_-12.5m",
+                path);
+        }
+
+        [Fact]
+        public void MissingExtendedValuesUseUnknownAndNoGps()
+        {
+            var result = TemplateEvaluator.Evaluate(
+                Parse("{Width}_{Aperture:0.0}_{Rating:D2}_{GpsLatitude}_{HasGps}"), Context);
+
+            Assert.Equal("Unknown_Unknown_Unknown_Unknown_NoGPS", result);
+        }
+
         private static ParsedTemplate Parse(string source)
         {
             var result = TemplateParser.Parse(source);
