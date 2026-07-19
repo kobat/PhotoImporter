@@ -147,7 +147,7 @@ P1-A と P1-B はコピー処理周辺で変更箇所が重なる可能性があ
 - コミット: 未実施（この作業ツリーに実装済み）
 - 残存リスク: 最終再検証から ReadOnly 解除・`MoveFileExW` までの上書き TOCTOU 窓は Windows API 上原子的に閉じられず、D-7 の既知リスクとして残る。属性復元不能はテスト代替で検証しており、実デバイス固有の ACL・ウイルス対策ソフト・故障媒体による失敗は未検証。
 
-### [ ] P2-A: パス長とテンプレート事前検証
+### [x] P2-A: パス長とテンプレート事前検証
 
 対象: M-3、M-5
 
@@ -178,10 +178,10 @@ P1-A と P1-B はコピー処理周辺で変更箇所が重なる可能性があ
 
 #### 完了記録
 
-- 実施内容:
-- 検証結果:
-- コミット:
-- 残存リスク:
+- 実施内容: 宛先ルートと32,767文字上限を `DestinationAllocator` から全テンプレート評価へ渡し、ルート込みのフルパス長を検証するようにした。日時書式をサンプル日時でパース時に評価し、不正書式およびパス不正文字を生成する書式を `InvalidDateFormat` とした。先頭・末尾・連続区切り、静的な空要素、`.`、`..`、空の `{Sequence}` 要素を `InvalidPathStructure` として入力時に拒否する。長いパスと Per-Monitor V2 を有効にする App.config / manifest を追加してアプリへ接続し、DESIGN / TEMPLATE_SPEC に上限と前提を明記した。
+- 検証結果: `dotnet test PhotoImporter.sln --no-restore -c Release` は146件成功。`dotnet build PhotoImporter.sln --no-restore -c Release` は警告0・エラー0。生成された `PhotoImporter.exe.config` に長いパス用 AppContext スイッチが含まれること、および `git diff --check` の成功を確認した。
+- コミット: 未実施（この作業ツリーに実装済み）
+- 残存リスク: 260文字超の実利用には Windows 側の LongPathsEnabled が必要であり、無効な端末ではOS/API側のエラーになる。ファイル固有の値でのみ発生する予約名、不正要素、各ファイルシステム固有の要素長制限は従来どおり行単位エラーとして扱う。
 
 ### [ ] P2-B: 選択状態と再スキャン
 

@@ -56,6 +56,7 @@ namespace PhotoImporter.Core.Tests
         [InlineData("{ExposureTime:0.000000}")]
         [InlineData("{ShutterSpeed:1_250}")]
         [InlineData("{GpsLatitude:dms}")]
+        [InlineData(@"{ModifiedDate:yyyy-MM-dd}\{TakenDate:yyyy}\{OriginalName}")]
         public void AcceptsExtendedFormats(string source)
         {
             Assert.True(TemplateParser.Parse(source).IsValid);
@@ -80,11 +81,19 @@ namespace PhotoImporter.Core.Tests
         [InlineData("{TakenDateInTimeZone:XYZ}", TemplateErrorCode.InvalidTimeZoneCode)]
         [InlineData("{TakenDateInTimeZone:UTC+15}", TemplateErrorCode.InvalidUtcOffset)]
         [InlineData("{TakenDateInTimeZone:UTC+9|}", TemplateErrorCode.InvalidDateFormat)]
+        [InlineData("{ModifiedDate:%}", TemplateErrorCode.InvalidDateFormat)]
+        [InlineData("{ModifiedDate:HH:mm}", TemplateErrorCode.InvalidDateFormat)]
         [InlineData("{Protected:x}", TemplateErrorCode.FormatNotSupported)]
         [InlineData("{Aperture:D5}", TemplateErrorCode.InvalidNumberFormat)]
         [InlineData("{ShutterSpeed:1/250}", TemplateErrorCode.InvalidNumberFormat)]
         [InlineData("{GpsLatitude:D6}", TemplateErrorCode.InvalidNumberFormat)]
         [InlineData("folder/file.jpg", TemplateErrorCode.InvalidLiteralCharacter)]
+        [InlineData(@"\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
+        [InlineData(@"folder\", TemplateErrorCode.InvalidPathStructure)]
+        [InlineData(@"folder\\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
+        [InlineData(@"folder\.\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
+        [InlineData(@"folder\..\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
+        [InlineData(@"{Sequence}\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
         public void ReturnsStructuredErrors(string source, TemplateErrorCode expected)
         {
             var result = TemplateParser.Parse(source);

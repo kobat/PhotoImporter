@@ -73,6 +73,7 @@ namespace PhotoImporter.Core.Templates
 
     public static class TemplateEvaluator
     {
+        public const int MaximumFullPathLength = 32767;
         private const string DefaultDateFormat = "yyyyMMdd_HHmmss";
         private static readonly Regex ReservedDeviceName = new Regex(
             @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)",
@@ -82,7 +83,7 @@ namespace PhotoImporter.Core.Templates
             ParsedTemplate template,
             FileTemplateContext context,
             int? sequenceNumber = null,
-            int maximumFullPathLength = 259,
+            int maximumFullPathLength = MaximumFullPathLength,
             string destinationRoot = null)
             => EvaluateDetailed(template, context, sequenceNumber, maximumFullPathLength, destinationRoot).RelativePath;
 
@@ -90,7 +91,7 @@ namespace PhotoImporter.Core.Templates
             ParsedTemplate template,
             FileTemplateContext context,
             int? sequenceNumber = null,
-            int maximumFullPathLength = 259,
+            int maximumFullPathLength = MaximumFullPathLength,
             string destinationRoot = null)
         {
             if (template == null) throw new ArgumentNullException(nameof(template));
@@ -251,11 +252,17 @@ namespace PhotoImporter.Core.Templates
             var relativePath = output.ToString();
             ValidateRelativePath(relativePath, template);
             if (destinationRoot != null &&
-                Path.Combine(destinationRoot, relativePath).Length > maximumFullPathLength)
+                GetCombinedPathLength(destinationRoot, relativePath) > maximumFullPathLength)
             {
                 throw new TemplateException(new TemplateError(TemplateErrorCode.PathTooLong, 0, template.Source.Length));
             }
             return new TemplateEvaluation(relativePath, warnings);
+        }
+
+        private static int GetCombinedPathLength(string root, string relativePath)
+        {
+            if (root.Length == 0) return relativePath.Length;
+            return root.Length + (root.EndsWith("\\", StringComparison.Ordinal) ? 0 : 1) + relativePath.Length;
         }
 
         private static DateTime GetTakenDate(FileTemplateContext context, ICollection<TemplateWarningCode> warnings)

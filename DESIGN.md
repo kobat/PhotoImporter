@@ -44,7 +44,7 @@ Windows 用デスクトップアプリ。カメラ・SDカード・CFexpress カ
 
 - **C# 言語バージョン**: 公式は C# 7.3。`LangVersion` を上げれば record / init も `IsExternalInit` ポリフィルで使用可。`Parallel.ForEachAsync` は無いので `SemaphoreSlim` + `Task.WhenAll` で並列化。`System.Text.Json` は NuGet 版が net481 で動く
 - **High DPI**: Per-Monitor V2 は app.manifest / app.config での明示設定が必要
-- **長いパス(260文字超)**: app.config の `Switch.System.IO.UseLegacyPathHandling=false` + OS 側 LongPathsEnabled。加えてアプリ側で宛先パス長のバリデーションを入れる
+- **長いパス(260文字超)**: app.config の `Switch.System.IO.UseLegacyPathHandling=false` / `Switch.System.IO.BlockLongPaths=false` と manifest の `longPathAware` を有効にし、OS 側の LongPathsEnabled を前提とする。アプリではコピー先ルートを含むフルパスを Windows の長いパス上限である32,767文字以内に制限する
 - **MTP 非対応(v1 の割り切り)**: カメラ本体の USB 接続(MTPデバイス)は通常のファイルAPIで読めない。v1 は**ドライブレターが付くもの(カードリーダー経由)に限定**。MTP は将来課題
 
 ### コピー元の再帰走査

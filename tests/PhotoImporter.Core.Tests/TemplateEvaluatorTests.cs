@@ -91,9 +91,6 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Theory]
-        [InlineData(@"\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
-        [InlineData(@"folder\\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
-        [InlineData(@"{Sequence}\{OriginalName}", TemplateErrorCode.InvalidPathStructure)]
         [InlineData("CON.jpg", TemplateErrorCode.ReservedDeviceName)]
         public void RejectsUnsafeGeneratedPaths(string source, TemplateErrorCode expected)
         {

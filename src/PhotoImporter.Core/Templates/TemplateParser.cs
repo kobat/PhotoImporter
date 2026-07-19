@@ -128,8 +128,11 @@ namespace PhotoImporter.Core.Templates
             }
 
             FlushLiteral(parts, literal, literalStart);
-            return new TemplateParseResult(
-                new ParsedTemplate(source, parts, requiresExif, sequenceWidth), null);
+            TemplateError structureError;
+            if (!ValidateStaticPathStructure(parts, source.Length, out structureError))
+                return new TemplateParseResult(null, structureError);
+
+            return new TemplateParseResult(new ParsedTemplate(source, parts, requiresExif, sequenceWidth), null);
         }
 
         private static bool ValidateFormat(
@@ -150,7 +153,7 @@ namespace PhotoImporter.Core.Templates
                     error = new TemplateError(errorCode, position, length, token.ToString());
                     return false;
                 }
-                return true;
+                return ValidateDateFormat(dateFormat, token, position, length, out error);
             }
 
             if (token == TemplateTokenKind.Sequence)
@@ -234,6 +237,84 @@ namespace PhotoImporter.Core.Templates
                 return false;
             }
 
+            if (isDate && !ValidateDateFormat(format, token, position, length, out error))
+                return false;
+
+            return true;
+        }
+
+        private static bool ValidateDateFormat(
+            string format,
+            TemplateTokenKind token,
+            int position,
+            int length,
+            out TemplateError error)
+        {
+            error = null;
+            try
+            {
+                var formatted = new DateTime(2001, 2, 3, 4, 5, 6).ToString(
+                    format ?? "yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+                if (formatted.Length == 0 || formatted.Any(IsInvalidLiteral))
+                    throw new FormatException();
+            }
+            catch (FormatException)
+            {
+                error = new TemplateError(TemplateErrorCode.InvalidDateFormat, position, length, token.ToString());
+                return false;
+            }
+            return true;
+        }
+
+        private static bool ValidateStaticPathStructure(
+            IEnumerable<TemplatePart> parts,
+            int sourceLength,
+            out TemplateError error)
+        {
+            var sample = new StringBuilder();
+            foreach (var part in parts)
+            {
+                if (!part.Token.HasValue)
+                {
+                    sample.Append(part.Literal);
+                    continue;
+                }
+
+                switch (part.Token.Value)
+                {
+                    case TemplateTokenKind.Sequence:
+                        break;
+                    case TemplateTokenKind.ModifiedDate:
+                    case TemplateTokenKind.TakenDate:
+                    case TemplateTokenKind.TakenDateLocal:
+                        sample.Append(new DateTime(2001, 2, 3, 4, 5, 6).ToString(
+                            part.Format ?? "yyyyMMdd_HHmmss", CultureInfo.InvariantCulture));
+                        break;
+                    case TemplateTokenKind.TakenDateInTimeZone:
+                        TemplateTimeZone zone;
+                        string dateFormat;
+                        TemplateErrorCode errorCode;
+                        TemplateTimeZone.TryParseFormat(part.Format, out zone, out dateFormat, out errorCode);
+                        sample.Append(new DateTime(2001, 2, 3, 4, 5, 6).ToString(
+                            dateFormat, CultureInfo.InvariantCulture));
+                        break;
+                    default:
+                        sample.Append('x');
+                        break;
+                }
+            }
+
+            var value = sample.ToString();
+            var elements = value.Split('\\');
+            if (value.Length == 0 || value.StartsWith("\\", StringComparison.Ordinal) ||
+                value.EndsWith("\\", StringComparison.Ordinal) ||
+                elements.Any(item => item.Length == 0 || item == "." || item == ".."))
+            {
+                error = new TemplateError(TemplateErrorCode.InvalidPathStructure, 0, sourceLength);
+                return false;
+            }
+
+            error = null;
             return true;
         }
 

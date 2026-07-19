@@ -404,7 +404,8 @@ namespace PhotoImporter.App
                 template,
                 new FileSystemDestinationLookup(destinationRoot),
                 destinationTimestampPolicy,
-                overwriteExisting);
+                overwriteExisting,
+                destinationRoot);
             var scan = EnumerateSourceFiles(sourceRoot, cancellationToken);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));

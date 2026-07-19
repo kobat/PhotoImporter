@@ -167,6 +167,61 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(DestinationStatus.Conflict, second.Status);
         }
 
+        [Fact]
+        public void AcceptsDestinationPathAtConfiguredLimit()
+        {
+            Assert.Equal(32767, TemplateEvaluator.MaximumFullPathLength);
+            const string destinationRoot = @"C:\photos";
+            const string fileName = "A.jpg";
+            var maximum = destinationRoot.Length + 1 + fileName.Length;
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>()),
+                FileSystemTimestampPolicy.Create("NTFS"),
+                destinationRoot: destinationRoot,
+                maximumFullPathLength: maximum);
+
+            var result = allocator.Allocate(Context(fileName, 100), SourceTime);
+
+            Assert.Equal(fileName, result.RelativePath);
+        }
+
+        [Fact]
+        public void RejectsDestinationPathOverConfiguredLimitIncludingRoot()
+        {
+            const string destinationRoot = @"C:\photos";
+            const string fileName = "A.jpg";
+            var maximum = destinationRoot.Length + fileName.Length;
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>()),
+                FileSystemTimestampPolicy.Create("NTFS"),
+                destinationRoot: destinationRoot,
+                maximumFullPathLength: maximum);
+
+            var exception = Assert.Throws<TemplateException>(() =>
+                allocator.Allocate(Context(fileName, 100), SourceTime));
+
+            Assert.Equal(TemplateErrorCode.PathTooLong, exception.Error.Code);
+        }
+
+        [Fact]
+        public void IncludesLongDestinationRootForShortRelativePath()
+        {
+            var destinationRoot = @"C:\" + new string('r', 80);
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>()),
+                FileSystemTimestampPolicy.Create("NTFS"),
+                destinationRoot: destinationRoot,
+                maximumFullPathLength: 80);
+
+            var exception = Assert.Throws<TemplateException>(() =>
+                allocator.Allocate(Context("A.jpg", 100), SourceTime));
+
+            Assert.Equal(TemplateErrorCode.PathTooLong, exception.Error.Code);
+        }
+
         private static DestinationAllocator CreateAllocator(
             IDictionary<string, DestinationFileSnapshot> files,
             bool overwrite = false) =>

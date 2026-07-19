@@ -67,18 +67,26 @@ namespace PhotoImporter.Core.Templates
         private readonly IDestinationFileLookup _lookup;
         private readonly FileSystemTimestampPolicy _timestampPolicy;
         private readonly bool _overwriteExisting;
+        private readonly string _destinationRoot;
+        private readonly int _maximumFullPathLength;
         private readonly HashSet<string> _reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public DestinationAllocator(
             ParsedTemplate template,
             IDestinationFileLookup lookup,
             FileSystemTimestampPolicy timestampPolicy,
-            bool overwriteExisting = false)
+            bool overwriteExisting = false,
+            string destinationRoot = null,
+            int maximumFullPathLength = TemplateEvaluator.MaximumFullPathLength)
         {
             _template = template ?? throw new ArgumentNullException(nameof(template));
             _lookup = lookup ?? throw new ArgumentNullException(nameof(lookup));
             _timestampPolicy = timestampPolicy ?? throw new ArgumentNullException(nameof(timestampPolicy));
+            if (maximumFullPathLength < 1)
+                throw new ArgumentOutOfRangeException(nameof(maximumFullPathLength));
             _overwriteExisting = overwriteExisting;
+            _destinationRoot = destinationRoot;
+            _maximumFullPathLength = maximumFullPathLength;
         }
 
         public DestinationAllocation Allocate(FileTemplateContext context, DateTime sourceLastWriteTimeUtc)
@@ -87,7 +95,8 @@ namespace PhotoImporter.Core.Templates
             if (sourceLastWriteTimeUtc.Kind != DateTimeKind.Utc)
                 throw new ArgumentException("The timestamp must be UTC.", nameof(sourceLastWriteTimeUtc));
 
-            var basicEvaluation = TemplateEvaluator.EvaluateDetailed(_template, context);
+            var basicEvaluation = TemplateEvaluator.EvaluateDetailed(
+                _template, context, null, _maximumFullPathLength, _destinationRoot);
             var basicCandidate = basicEvaluation.RelativePath;
             var basic = CheckCandidate(
                 basicCandidate, context.FileSize, sourceLastWriteTimeUtc, basicEvaluation.Warnings, null);
@@ -100,7 +109,8 @@ namespace PhotoImporter.Core.Templates
             var maximum = (int)Math.Min(int.MaxValue, Math.Pow(10, width) - 1);
             for (var sequence = 1; sequence <= maximum; sequence++)
             {
-                var evaluation = TemplateEvaluator.EvaluateDetailed(_template, context, sequence);
+                var evaluation = TemplateEvaluator.EvaluateDetailed(
+                    _template, context, sequence, _maximumFullPathLength, _destinationRoot);
                 var candidate = evaluation.RelativePath;
                 var allocation = CheckCandidate(
                     candidate, context.FileSize, sourceLastWriteTimeUtc, evaluation.Warnings, sequence);
