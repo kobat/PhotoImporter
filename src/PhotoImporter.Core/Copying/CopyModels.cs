@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 
 namespace PhotoImporter.Core.Copying
@@ -28,6 +29,7 @@ namespace PhotoImporter.Core.Copying
             string destinationPath,
             FileSnapshot sourceSnapshot,
             DestinationFileSnapshot destinationSnapshot,
+            FileSystemTimestampPolicy destinationTimestampPolicy,
             bool overwrite)
         {
             SourcePath = sourcePath ?? throw new ArgumentNullException(nameof(sourcePath));
@@ -35,6 +37,11 @@ namespace PhotoImporter.Core.Copying
             DestinationPath = destinationPath ?? throw new ArgumentNullException(nameof(destinationPath));
             SourceSnapshot = sourceSnapshot ?? throw new ArgumentNullException(nameof(sourceSnapshot));
             DestinationSnapshot = destinationSnapshot;
+            DestinationTimestampPolicy = destinationTimestampPolicy ??
+                throw new ArgumentNullException(nameof(destinationTimestampPolicy));
+            if (!DestinationTimestampPolicy.IsSupported)
+                throw new NotSupportedException(
+                    "Unsupported destination file system: " + DestinationTimestampPolicy.FileSystemName);
             Overwrite = overwrite;
 
             var root = NormalizeRoot(DestinationRoot);
@@ -48,6 +55,7 @@ namespace PhotoImporter.Core.Copying
         public string DestinationPath { get; }
         public FileSnapshot SourceSnapshot { get; }
         public DestinationFileSnapshot DestinationSnapshot { get; }
+        public FileSystemTimestampPolicy DestinationTimestampPolicy { get; }
         public bool Overwrite { get; }
 
         private static string NormalizeRoot(string path)

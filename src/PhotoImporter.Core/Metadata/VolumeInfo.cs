@@ -6,6 +6,95 @@ using System.Text;
 
 namespace PhotoImporter.Core.Metadata
 {
+    public sealed class FileSystemTimestampPolicy
+    {
+        private const long ExFatResolutionTicks = TimeSpan.TicksPerMillisecond * 10;
+        private const long FatResolutionTicks = TimeSpan.TicksPerSecond * 2;
+
+        private enum TimestampStorage
+        {
+            ExactUtc,
+            TruncatedUtc,
+            TruncatedLocal,
+            Unsupported
+        }
+
+        private readonly TimestampStorage _storage;
+        private readonly long _resolutionTicks;
+        private readonly TimeZoneInfo _localTimeZone;
+
+        private FileSystemTimestampPolicy(
+            string fileSystemName,
+            TimestampStorage storage,
+            long resolutionTicks,
+            TimeZoneInfo localTimeZone)
+        {
+            FileSystemName = fileSystemName ?? string.Empty;
+            _storage = storage;
+            _resolutionTicks = resolutionTicks;
+            _localTimeZone = localTimeZone;
+        }
+
+        public string FileSystemName { get; }
+        public bool IsSupported => _storage != TimestampStorage.Unsupported;
+
+        public static FileSystemTimestampPolicy Create(string fileSystemName) =>
+            Create(fileSystemName, TimeZoneInfo.Local);
+
+        internal static FileSystemTimestampPolicy Create(string fileSystemName, TimeZoneInfo localTimeZone)
+        {
+            if (localTimeZone == null) throw new ArgumentNullException(nameof(localTimeZone));
+
+            var normalized = (fileSystemName ?? string.Empty).Trim();
+            if (string.Equals(normalized, "NTFS", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "ReFS", StringComparison.OrdinalIgnoreCase))
+                return new FileSystemTimestampPolicy(normalized, TimestampStorage.ExactUtc, 1, localTimeZone);
+
+            if (string.Equals(normalized, "exFAT", StringComparison.OrdinalIgnoreCase))
+                return new FileSystemTimestampPolicy(
+                    normalized, TimestampStorage.TruncatedUtc, ExFatResolutionTicks, localTimeZone);
+
+            if (string.Equals(normalized, "FAT", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "FAT32", StringComparison.OrdinalIgnoreCase))
+                return new FileSystemTimestampPolicy(
+                    normalized, TimestampStorage.TruncatedLocal, FatResolutionTicks, localTimeZone);
+
+            return new FileSystemTimestampPolicy(
+                normalized, TimestampStorage.Unsupported, 0, localTimeZone);
+        }
+
+        public bool Matches(DateTime expectedUtc, DateTime actualUtc)
+        {
+            EnsureUtc(expectedUtc, nameof(expectedUtc));
+            EnsureUtc(actualUtc, nameof(actualUtc));
+
+            switch (_storage)
+            {
+                case TimestampStorage.ExactUtc:
+                    return expectedUtc == actualUtc;
+                case TimestampStorage.TruncatedUtc:
+                    return Truncate(expectedUtc, _resolutionTicks).Ticks ==
+                           Truncate(actualUtc, _resolutionTicks).Ticks;
+                case TimestampStorage.TruncatedLocal:
+                    var expectedLocal = TimeZoneInfo.ConvertTimeFromUtc(expectedUtc, _localTimeZone);
+                    var actualLocal = TimeZoneInfo.ConvertTimeFromUtc(actualUtc, _localTimeZone);
+                    return Truncate(expectedLocal, _resolutionTicks).Ticks ==
+                           Truncate(actualLocal, _resolutionTicks).Ticks;
+                default:
+                    return false;
+            }
+        }
+
+        private static DateTime Truncate(DateTime value, long resolutionTicks) =>
+            new DateTime(value.Ticks - value.Ticks % resolutionTicks, value.Kind);
+
+        private static void EnsureUtc(DateTime value, string name)
+        {
+            if (value.Kind != DateTimeKind.Utc)
+                throw new ArgumentException("The timestamp must be UTC.", name);
+        }
+    }
+
     public sealed class VolumeInfo
     {
         public VolumeInfo(
@@ -22,6 +111,7 @@ namespace PhotoImporter.Core.Metadata
             SerialNumber = serialNumber;
             Label = label ?? string.Empty;
             FileSystemName = fileSystemName ?? string.Empty;
+            TimestampPolicy = FileSystemTimestampPolicy.Create(FileSystemName);
             DriveType = driveType;
             TotalBytes = totalBytes;
         }
@@ -31,6 +121,7 @@ namespace PhotoImporter.Core.Metadata
         public string SerialNumberHex => SerialNumber.ToString("X8");
         public string Label { get; }
         public string FileSystemName { get; }
+        public FileSystemTimestampPolicy TimestampPolicy { get; }
         public DriveType DriveType { get; }
         public ulong TotalBytes { get; }
 

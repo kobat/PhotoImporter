@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using PhotoImporter.Core.Copying;
+using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 using Xunit;
 
@@ -27,6 +28,7 @@ namespace PhotoImporter.Core.Tests
                 destination,
                 new FileSnapshot(sourceInfo.Length, sourceInfo.LastWriteTimeUtc),
                 null,
+                FileSystemTimestampPolicy.Create("NTFS"),
                 false);
 
             var result = new CopyEngine().Execute(new[] { plan }, null, CancellationToken.None);
@@ -47,6 +49,7 @@ namespace PhotoImporter.Core.Tests
                 Path.Combine(_root, "out", "changed.jpg"),
                 new FileSnapshot(info.Length, info.LastWriteTimeUtc),
                 null,
+                FileSystemTimestampPolicy.Create("NTFS"),
                 false);
             File.AppendAllText(source, "changed");
 
@@ -71,6 +74,7 @@ namespace PhotoImporter.Core.Tests
                 destination,
                 new FileSnapshot(sourceInfo.Length, sourceInfo.LastWriteTimeUtc),
                 new DestinationFileSnapshot(destinationInfo.Length, destinationInfo.LastWriteTimeUtc),
+                FileSystemTimestampPolicy.Create("NTFS"),
                 true);
 
             var result = new CopyEngine().Execute(new[] { plan }, null, CancellationToken.None);
@@ -88,9 +92,11 @@ namespace PhotoImporter.Core.Tests
             var items = new List<CopyPlanItem>
             {
                 new CopyPlanItem(missing, _root, Path.Combine(_root, "out", "missing.jpg"),
-                    new FileSnapshot(1, DateTime.UtcNow), null, false),
+                    new FileSnapshot(1, DateTime.UtcNow), null,
+                    FileSystemTimestampPolicy.Create("NTFS"), false),
                 new CopyPlanItem(good, _root, Path.Combine(_root, "out", "good.jpg"),
-                    new FileSnapshot(goodInfo.Length, goodInfo.LastWriteTimeUtc), null, false)
+                    new FileSnapshot(goodInfo.Length, goodInfo.LastWriteTimeUtc), null,
+                    FileSystemTimestampPolicy.Create("NTFS"), false)
             };
 
             var result = new CopyEngine().Execute(items, null, CancellationToken.None);

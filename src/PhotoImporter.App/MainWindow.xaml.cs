@@ -392,9 +392,18 @@ namespace PhotoImporter.App
             cancellationToken.ThrowIfCancellationRequested();
             var result = new List<PreviewItem>();
             var warnings = new List<string>();
+            var destinationVolume = new WindowsVolumeInfoReader().Read(destinationRoot);
+            var destinationTimestampPolicy = destinationVolume.TimestampPolicy;
+            if (!destinationTimestampPolicy.IsSupported)
+                throw new NotSupportedException(string.Format(
+                    "コピー先のファイルシステム「{0}」には対応していません。NTFS、ReFS、exFAT、FAT、FAT32 のいずれかを使用してください。",
+                    string.IsNullOrWhiteSpace(destinationVolume.FileSystemName)
+                        ? "不明"
+                        : destinationVolume.FileSystemName));
             var allocator = new DestinationAllocator(
                 template,
                 new FileSystemDestinationLookup(destinationRoot),
+                destinationTimestampPolicy,
                 overwriteExisting);
             var scan = EnumerateSourceFiles(sourceRoot, cancellationToken);
             foreach (var issue in scan.Issues)
@@ -478,6 +487,7 @@ namespace PhotoImporter.App
                             destinationPath,
                             new FileSnapshot(info.Length, info.LastWriteTimeUtc),
                             allocation.DestinationSnapshot,
+                            destinationTimestampPolicy,
                             allocation.Status == DestinationStatus.Overwrite)
                         : null;
                     result.Add(new PreviewItem(

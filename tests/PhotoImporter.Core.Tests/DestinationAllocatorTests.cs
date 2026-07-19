@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 using Xunit;
 
@@ -21,20 +22,68 @@ namespace PhotoImporter.Core.Tests
             Assert.Null(result.SequenceNumber);
         }
 
-        [Theory]
-        [InlineData(0)]
-        [InlineData(1)]
-        public void MarksSameOrNewerDestinationAsImported(int hoursNewer)
+        [Fact]
+        public void MarksSameSizeAndTimestampAsImported()
         {
             var files = new Dictionary<string, DestinationFileSnapshot>
             {
-                ["A.jpg"] = Snapshot(999, SourceTime.AddHours(hoursNewer))
+                ["A.jpg"] = Snapshot(100, SourceTime)
             };
 
             var result = CreateAllocator(files).Allocate(Context("A.jpg", 100), SourceTime);
 
             Assert.Equal(DestinationStatus.Imported, result.Status);
-            Assert.Equal(999, result.DestinationSnapshot.FileSize);
+            Assert.Equal(100, result.DestinationSnapshot.FileSize);
+        }
+
+        [Fact]
+        public void DifferentSizeIsNotImportedEvenWhenDestinationIsNewer()
+        {
+            var files = new Dictionary<string, DestinationFileSnapshot>
+            {
+                ["A.jpg"] = Snapshot(999, SourceTime.AddHours(1))
+            };
+
+            var result = CreateAllocator(files).Allocate(Context("A.jpg", 100), SourceTime);
+
+            Assert.Equal("A_001.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.NotImported, result.Status);
+        }
+
+        [Fact]
+        public void SameSizeButNewerTimestampIsNotImported()
+        {
+            var files = new Dictionary<string, DestinationFileSnapshot>
+            {
+                ["A.jpg"] = Snapshot(100, SourceTime.AddTicks(1))
+            };
+
+            var result = CreateAllocator(files).Allocate(Context("A.jpg", 100), SourceTime);
+
+            Assert.Equal("A_001.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.NotImported, result.Status);
+        }
+
+        [Fact]
+        public void ExFatRoundedTimestampIsImportedOnRescan()
+        {
+            var sourceTime = SourceTime.AddTicks(123456);
+            var roundedTime = new DateTime(
+                sourceTime.Ticks - sourceTime.Ticks % (TimeSpan.TicksPerMillisecond * 10),
+                DateTimeKind.Utc);
+            var files = new Dictionary<string, DestinationFileSnapshot>
+            {
+                ["A.jpg"] = Snapshot(100, roundedTime)
+            };
+            var allocator = new DestinationAllocator(
+                Parse("{FileName}{Sequence}{Extension}"),
+                new DictionaryLookup(files),
+                FileSystemTimestampPolicy.Create("exFAT"));
+
+            var result = allocator.Allocate(Context("A.jpg", 100), sourceTime);
+
+            Assert.Equal("A.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.Imported, result.Status);
         }
 
         [Theory]
@@ -64,6 +113,7 @@ namespace PhotoImporter.Core.Tests
                 {
                     ["A.jpg"] = Snapshot(90, SourceTime.AddSeconds(-1))
                 }),
+                FileSystemTimestampPolicy.Create("NTFS"),
                 true);
 
             var result = allocator.Allocate(Context("A.jpg", 100), SourceTime);
@@ -80,7 +130,8 @@ namespace PhotoImporter.Core.Tests
                 new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>
                 {
                     ["A.jpg"] = Snapshot(90, SourceTime.AddSeconds(-1))
-                }));
+                }),
+                FileSystemTimestampPolicy.Create("NTFS"));
 
             var result = allocator.Allocate(Context("A.jpg", 100), SourceTime);
 
@@ -107,6 +158,7 @@ namespace PhotoImporter.Core.Tests
             var allocator = new DestinationAllocator(
                 Parse("{OriginalName}"),
                 new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>()),
+                FileSystemTimestampPolicy.Create("NTFS"),
                 true);
 
             allocator.Allocate(Context("A.jpg", 100), SourceTime);
@@ -121,6 +173,7 @@ namespace PhotoImporter.Core.Tests
             new DestinationAllocator(
                 Parse("{FileName}{Sequence}{Extension}"),
                 new DictionaryLookup(files),
+                FileSystemTimestampPolicy.Create("NTFS"),
                 overwrite);
 
         private static ParsedTemplate Parse(string source)

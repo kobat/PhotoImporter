@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using PhotoImporter.Core.Metadata;
 
 namespace PhotoImporter.Core.Templates
 {
@@ -64,16 +65,19 @@ namespace PhotoImporter.Core.Templates
     {
         private readonly ParsedTemplate _template;
         private readonly IDestinationFileLookup _lookup;
+        private readonly FileSystemTimestampPolicy _timestampPolicy;
         private readonly bool _overwriteExisting;
         private readonly HashSet<string> _reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public DestinationAllocator(
             ParsedTemplate template,
             IDestinationFileLookup lookup,
+            FileSystemTimestampPolicy timestampPolicy,
             bool overwriteExisting = false)
         {
             _template = template ?? throw new ArgumentNullException(nameof(template));
             _lookup = lookup ?? throw new ArgumentNullException(nameof(lookup));
+            _timestampPolicy = timestampPolicy ?? throw new ArgumentNullException(nameof(timestampPolicy));
             _overwriteExisting = overwriteExisting;
         }
 
@@ -85,7 +89,8 @@ namespace PhotoImporter.Core.Templates
 
             var basicEvaluation = TemplateEvaluator.EvaluateDetailed(_template, context);
             var basicCandidate = basicEvaluation.RelativePath;
-            var basic = CheckCandidate(basicCandidate, sourceLastWriteTimeUtc, basicEvaluation.Warnings, null);
+            var basic = CheckCandidate(
+                basicCandidate, context.FileSize, sourceLastWriteTimeUtc, basicEvaluation.Warnings, null);
             if (basic != null) return basic;
 
             if (!_template.HasSequence)
@@ -97,7 +102,8 @@ namespace PhotoImporter.Core.Templates
             {
                 var evaluation = TemplateEvaluator.EvaluateDetailed(_template, context, sequence);
                 var candidate = evaluation.RelativePath;
-                var allocation = CheckCandidate(candidate, sourceLastWriteTimeUtc, evaluation.Warnings, sequence);
+                var allocation = CheckCandidate(
+                    candidate, context.FileSize, sourceLastWriteTimeUtc, evaluation.Warnings, sequence);
                 if (allocation != null) return allocation;
             }
 
@@ -106,6 +112,7 @@ namespace PhotoImporter.Core.Templates
 
         private DestinationAllocation CheckCandidate(
             string relativePath,
+            long sourceFileSize,
             DateTime sourceLastWriteTimeUtc,
             IReadOnlyList<TemplateWarningCode> warnings,
             int? sequenceNumber)
@@ -116,7 +123,8 @@ namespace PhotoImporter.Core.Templates
             if (!_lookup.TryGetFile(relativePath, out destination))
                 return Reserve(relativePath, DestinationStatus.NotImported, null, warnings, sequenceNumber);
 
-            if (sourceLastWriteTimeUtc <= destination.LastWriteTimeUtc)
+            if (sourceFileSize == destination.FileSize &&
+                _timestampPolicy.Matches(sourceLastWriteTimeUtc, destination.LastWriteTimeUtc))
                 return Reserve(relativePath, DestinationStatus.Imported, destination, warnings, sequenceNumber);
 
             if (_template.HasSequence)

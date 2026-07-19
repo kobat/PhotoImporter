@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
+using PhotoImporter.Core.Metadata;
 
 namespace PhotoImporter.Core.Copying
 {
@@ -75,7 +76,7 @@ namespace PhotoImporter.Core.Copying
 
         private void ExecuteOne(CopyPlanItem item, CancellationToken token, Action<long> progress)
         {
-            ValidateSnapshot(item.SourcePath, item.SourceSnapshot, "コピー元");
+            ValidateSourceSnapshot(item.SourcePath, item.SourceSnapshot, "コピー元");
             ValidateDestination(item);
             token.ThrowIfCancellationRequested();
 
@@ -98,7 +99,8 @@ namespace PhotoImporter.Core.Copying
                     throw new OperationCanceledException(token);
                 }
 
-                ValidateSnapshot(partialPath, item.SourceSnapshot, "一時ファイル");
+                ValidateDestinationSnapshot(
+                    partialPath, item.SourceSnapshot, item.DestinationTimestampPolicy, "一時ファイル");
                 ValidateDestination(item);
                 token.ThrowIfCancellationRequested();
 
@@ -120,7 +122,8 @@ namespace PhotoImporter.Core.Copying
 
                 if (File.Exists(partialPath))
                     throw new CopyRecoveryException("確定後も一時ファイルが残っています。", partialPath);
-                ValidateSnapshot(item.DestinationPath, item.SourceSnapshot, "コピー先");
+                ValidateDestinationSnapshot(
+                    item.DestinationPath, item.SourceSnapshot, item.DestinationTimestampPolicy, "コピー先");
             }
             catch (CopyRecoveryException)
             {
@@ -149,19 +152,45 @@ namespace PhotoImporter.Core.Copying
             {
                 var info = new FileInfo(item.DestinationPath);
                 return info.Length == item.DestinationSnapshot.FileSize &&
-                       info.LastWriteTimeUtc == item.DestinationSnapshot.LastWriteTimeUtc;
+                       item.DestinationTimestampPolicy.Matches(
+                           item.DestinationSnapshot.LastWriteTimeUtc, info.LastWriteTimeUtc);
             }
             catch (IOException) { return false; }
             catch (UnauthorizedAccessException) { return false; }
         }
 
-        private static void ValidateSnapshot(string path, FileSnapshot expected, string label)
+        private static void ValidateSourceSnapshot(string path, FileSnapshot expected, string label)
         {
             if (!File.Exists(path))
                 throw new FileNotFoundException(label + "が見つかりません。再スキャンしてください。", path);
             var info = new FileInfo(path);
             if (info.Length != expected.FileSize || info.LastWriteTimeUtc != expected.LastWriteTimeUtc)
                 throw new InvalidOperationException(label + "がスキャン時から変更されています。再スキャンしてください。");
+        }
+
+        private static void ValidateDestinationSnapshot(
+            string path,
+            FileSnapshot expected,
+            FileSystemTimestampPolicy timestampPolicy,
+            string label)
+        {
+            if (!File.Exists(path))
+                throw new FileNotFoundException(label + "が見つかりません。再スキャンしてください。", path);
+            var info = new FileInfo(path);
+            if (!SnapshotMatches(expected, info.Length, info.LastWriteTimeUtc, timestampPolicy))
+                throw new InvalidOperationException(label + "がスキャン時から変更されています。再スキャンしてください。");
+        }
+
+        internal static bool SnapshotMatches(
+            FileSnapshot expected,
+            long actualFileSize,
+            DateTime actualLastWriteTimeUtc,
+            FileSystemTimestampPolicy timestampPolicy)
+        {
+            if (expected == null) throw new ArgumentNullException(nameof(expected));
+            if (timestampPolicy == null) throw new ArgumentNullException(nameof(timestampPolicy));
+            return actualFileSize == expected.FileSize &&
+                   timestampPolicy.Matches(expected.LastWriteTimeUtc, actualLastWriteTimeUtc);
         }
 
         private static void TryDeleteSafePartial(string partialPath, string expectedDirectory, string destinationRoot)
