@@ -17,7 +17,29 @@ namespace PhotoImporter.Core.Copying
         private static readonly Regex PartialName = new Regex(
             @"^PI_[0-9A-Fa-f]{32}\.partial$",
             RegexOptions.CultureInvariant);
-        private readonly CopyFile2Native _native = new CopyFile2Native();
+        private readonly ICopyFileOperation _copyFile;
+        private readonly MoveFileOperation _moveFile;
+        private readonly IFileAttributeOperations _fileAttributes;
+
+        public CopyEngine()
+            : this(new CopyFile2Native(), TryMoveFile, new FileAttributeOperations())
+        {
+        }
+
+        internal CopyEngine(ICopyFileOperation copyFile)
+            : this(copyFile, TryMoveFile, new FileAttributeOperations())
+        {
+        }
+
+        internal CopyEngine(
+            ICopyFileOperation copyFile,
+            MoveFileOperation moveFile,
+            IFileAttributeOperations fileAttributes)
+        {
+            _copyFile = copyFile ?? throw new ArgumentNullException(nameof(copyFile));
+            _moveFile = moveFile ?? throw new ArgumentNullException(nameof(moveFile));
+            _fileAttributes = fileAttributes ?? throw new ArgumentNullException(nameof(fileAttributes));
+        }
 
         public CopyBatchResult Execute(
             IEnumerable<CopyPlanItem> plan,
@@ -92,7 +114,7 @@ namespace PhotoImporter.Core.Copying
             {
                 try
                 {
-                    _native.Copy(item.SourcePath, partialPath, token, progress);
+                    _copyFile.Copy(item.SourcePath, partialPath, token, progress);
                 }
                 catch (COMException) when (token.IsCancellationRequested)
                 {
@@ -105,12 +127,33 @@ namespace PhotoImporter.Core.Copying
                 token.ThrowIfCancellationRequested();
 
                 var flags = MoveFileWriteThrough | (item.Overwrite ? MoveFileReplaceExisting : 0u);
-                if (!MoveFileEx(partialPath, item.DestinationPath, flags))
+                var destinationReadOnlyCleared = TryClearReadOnlyDestination(item);
+                bool moved;
+                int error;
+                try
                 {
-                    var error = Marshal.GetLastWin32Error();
+                    moved = _moveFile(partialPath, item.DestinationPath, flags, out error);
+                }
+                catch (Exception ex)
+                {
+                    if (destinationReadOnlyCleared && !TryRestoreDestinationReadOnly(item))
+                        throw CreateReadOnlyRecoveryException(item, partialPath, 0, ex);
+                    throw;
+                }
+
+                if (!moved)
+                {
+                    if (destinationReadOnlyCleared && !TryRestoreDestinationReadOnly(item))
+                        throw CreateReadOnlyRecoveryException(item, partialPath, error, null);
+
                     if (DestinationMatchesExpected(item))
                     {
-                        TryDeleteSafePartial(partialPath, destinationDirectory, item.DestinationRoot);
+                        if (!TryDeleteSafePartial(
+                                partialPath, destinationDirectory, item.DestinationRoot, _fileAttributes))
+                            throw new CopyRecoveryException(
+                                "正式なファイル名を確定できず、一時ファイルも削除できませんでした。",
+                                partialPath,
+                                error);
                         throw new Win32Exception(error, "正式なファイル名を確定できませんでした。");
                     }
 
@@ -129,11 +172,56 @@ namespace PhotoImporter.Core.Copying
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
-                TryDeleteSafePartial(partialPath, destinationDirectory, item.DestinationRoot);
+                if (!TryDeleteSafePartial(
+                        partialPath, destinationDirectory, item.DestinationRoot, _fileAttributes))
+                    throw new CopyRecoveryException(
+                        "コピーに失敗し、一時ファイルを安全に削除できませんでした。",
+                        partialPath,
+                        0,
+                        ex);
                 throw;
             }
+        }
+
+        private bool TryClearReadOnlyDestination(CopyPlanItem item)
+        {
+            if (!item.Overwrite || item.DestinationSnapshot == null) return false;
+
+            var attributes = _fileAttributes.GetAttributes(item.DestinationPath);
+            if ((attributes & FileAttributes.ReadOnly) == 0) return false;
+            _fileAttributes.SetAttributes(item.DestinationPath, RemoveReadOnly(attributes));
+            return true;
+        }
+
+        private bool TryRestoreDestinationReadOnly(CopyPlanItem item)
+        {
+            try
+            {
+                if (!DestinationMatchesExpected(item)) return false;
+                var attributes = _fileAttributes.GetAttributes(item.DestinationPath);
+                _fileAttributes.SetAttributes(item.DestinationPath, AddReadOnly(attributes));
+                return DestinationMatchesExpected(item) &&
+                       (_fileAttributes.GetAttributes(item.DestinationPath) & FileAttributes.ReadOnly) != 0;
+            }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+            catch (ArgumentException) { return false; }
+            catch (NotSupportedException) { return false; }
+            catch (System.Security.SecurityException) { return false; }
+        }
+
+        private static CopyRecoveryException CreateReadOnlyRecoveryException(
+            CopyPlanItem item,
+            string partialPath,
+            int win32Error,
+            Exception innerException)
+        {
+            var message =
+                "正式なファイル名を確定できず、旧コピー先の読み取り専用属性を復元できませんでした。" +
+                "コピー先を確認してください: " + item.DestinationPath;
+            return new CopyRecoveryException(message, partialPath, win32Error, innerException);
         }
 
         private static void ValidateDestination(CopyPlanItem item)
@@ -193,27 +281,77 @@ namespace PhotoImporter.Core.Copying
                    timestampPolicy.Matches(expected.LastWriteTimeUtc, actualLastWriteTimeUtc);
         }
 
-        private static void TryDeleteSafePartial(string partialPath, string expectedDirectory, string destinationRoot)
+        internal static bool TryDeleteSafePartial(
+            string partialPath,
+            string expectedDirectory,
+            string destinationRoot)
+        {
+            return TryDeleteSafePartial(
+                partialPath, expectedDirectory, destinationRoot, new FileAttributeOperations());
+        }
+
+        private static bool TryDeleteSafePartial(
+            string partialPath,
+            string expectedDirectory,
+            string destinationRoot,
+            IFileAttributeOperations fileAttributes)
         {
             try
             {
                 var fullPartialPath = Path.GetFullPath(partialPath);
                 var rootPrefix = EnsureTrailingSeparator(Path.GetFullPath(destinationRoot));
-                if (!fullPartialPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)) return;
+                if (!fullPartialPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)) return false;
                 if (!string.Equals(
                         Path.GetFullPath(Path.GetDirectoryName(fullPartialPath)),
                         Path.GetFullPath(expectedDirectory),
-                        StringComparison.OrdinalIgnoreCase)) return;
-                if (!PartialName.IsMatch(Path.GetFileName(fullPartialPath))) return;
-                if (!File.Exists(fullPartialPath)) return;
-                var attributes = File.GetAttributes(fullPartialPath);
+                        StringComparison.OrdinalIgnoreCase)) return false;
+                if (!PartialName.IsMatch(Path.GetFileName(fullPartialPath))) return false;
+                if (!File.Exists(fullPartialPath)) return true;
+                var attributes = fileAttributes.GetAttributes(fullPartialPath);
                 if ((attributes & FileAttributes.ReparsePoint) != 0 ||
-                    (attributes & FileAttributes.Directory) != 0) return;
-                File.Delete(fullPartialPath);
+                    (attributes & FileAttributes.Directory) != 0) return false;
+
+                var readOnly = (attributes & FileAttributes.ReadOnly) != 0;
+                if (readOnly)
+                    fileAttributes.SetAttributes(fullPartialPath, RemoveReadOnly(attributes));
+                try
+                {
+                    File.Delete(fullPartialPath);
+                    return !File.Exists(fullPartialPath);
+                }
+                catch
+                {
+                    if (readOnly && File.Exists(fullPartialPath))
+                    {
+                        try
+                        {
+                            var current = fileAttributes.GetAttributes(fullPartialPath);
+                            fileAttributes.SetAttributes(fullPartialPath, AddReadOnly(current));
+                        }
+                        catch (IOException) { }
+                        catch (UnauthorizedAccessException) { }
+                        catch (ArgumentException) { }
+                        catch (NotSupportedException) { }
+                        catch (System.Security.SecurityException) { }
+                    }
+                    throw;
+                }
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+            catch (ArgumentException) { return false; }
+            catch (NotSupportedException) { return false; }
+            catch (System.Security.SecurityException) { return false; }
         }
+
+        private static FileAttributes RemoveReadOnly(FileAttributes attributes)
+        {
+            var result = attributes & ~FileAttributes.ReadOnly;
+            return result == 0 ? FileAttributes.Normal : result;
+        }
+
+        private static FileAttributes AddReadOnly(FileAttributes attributes) =>
+            (attributes & ~FileAttributes.Normal) | FileAttributes.ReadOnly;
 
         private static string EnsureTrailingSeparator(string path) =>
             path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
@@ -233,15 +371,52 @@ namespace PhotoImporter.Core.Copying
                     completedFiles, totalFiles, transferredBytes, totalBytes, currentSourcePath));
         }
 
+        private static bool TryMoveFile(
+            string existingFileName,
+            string newFileName,
+            uint flags,
+            out int error)
+        {
+            var moved = MoveFileEx(existingFileName, newFileName, flags);
+            error = moved ? 0 : Marshal.GetLastWin32Error();
+            return moved;
+        }
+
         [DllImport("kernel32.dll", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool MoveFileEx(string existingFileName, string newFileName, uint flags);
     }
 
+    internal delegate bool MoveFileOperation(
+        string existingFileName,
+        string newFileName,
+        uint flags,
+        out int error);
+
+    internal interface IFileAttributeOperations
+    {
+        FileAttributes GetAttributes(string path);
+        void SetAttributes(string path, FileAttributes attributes);
+    }
+
+    internal sealed class FileAttributeOperations : IFileAttributeOperations
+    {
+        public FileAttributes GetAttributes(string path) => File.GetAttributes(path);
+
+        public void SetAttributes(string path, FileAttributes attributes) =>
+            File.SetAttributes(path, attributes);
+    }
+
     public sealed class CopyRecoveryException : IOException
     {
-        internal CopyRecoveryException(string message, string recoveryPath, int win32Error = 0)
-            : base(win32Error == 0 ? message : message + " (Win32 " + win32Error + ")")
+        internal CopyRecoveryException(
+            string message,
+            string recoveryPath,
+            int win32Error = 0,
+            Exception innerException = null)
+            : base(
+                win32Error == 0 ? message : message + " (Win32 " + win32Error + ")",
+                innerException)
         {
             RecoveryPath = recoveryPath;
         }

@@ -5,13 +5,22 @@ using System.Threading;
 
 namespace PhotoImporter.Core.Copying
 {
-    internal sealed class CopyFile2Native
+    internal interface ICopyFileOperation
+    {
+        void Copy(
+            string sourcePath,
+            string destinationPath,
+            CancellationToken cancellationToken,
+            Action<long> progress);
+    }
+
+    internal sealed class CopyFile2Native : ICopyFileOperation
     {
         private const uint CopyFileFailIfExists = 0x00000001;
         private const int CallbackChunkFinished = 2;
         private const int CallbackStreamFinished = 4;
 
-        internal void Copy(
+        public void Copy(
             string sourcePath,
             string destinationPath,
             CancellationToken cancellationToken,
