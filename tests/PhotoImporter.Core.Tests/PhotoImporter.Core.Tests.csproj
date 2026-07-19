@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net481</TargetFramework>
     <LangVersion>7.3</LangVersion>
+    <UseWPF>true</UseWPF>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
@@ -14,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\PhotoImporter.Core\PhotoImporter.Core.csproj" />
+    <ProjectReference Include="..\..\src\PhotoImporter.App\PhotoImporter.App.csproj" />
   </ItemGroup>
 </Project>

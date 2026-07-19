@@ -42,6 +42,7 @@ namespace PhotoImporter.App
         private CancellationTokenSource _copyCancellation;
         private CancellationTokenSource _scanCancellation;
         private PreviewItem _selectedPreviewItem;
+        private bool _isUpdatingSelection;
 
         public MainWindow()
         {
@@ -165,6 +166,8 @@ namespace PhotoImporter.App
         public Visibility ProgressVisibility => _isCopying || _isScanningExif ? Visibility.Visible : Visibility.Collapsed;
         public bool CanEditSettings => !_isBusy;
         public bool CanSelectItems => !_isBusy;
+        public bool CanSelectAll => !_isBusy && Items.Any(item => item.CanCopy);
+        public bool? SelectAllState => PreviewSelectionState.GetSelectAllState(Items);
         public bool CanCancel => _isCopying || _isScanningExif;
         public bool CanScan => !_isBusy && !string.IsNullOrWhiteSpace(SourceFolder) &&
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
@@ -287,6 +290,7 @@ namespace PhotoImporter.App
         {
             var selected = Items.Where(item => item.IsSelected && item.CanCopy).ToList();
             if (selected.Count == 0) return;
+            var selectionBeforeCopy = PreviewSelectionState.Capture(Items);
 
             _copyCancellation = new CancellationTokenSource();
             SetBusy(true, true);
@@ -329,11 +333,16 @@ namespace PhotoImporter.App
             var rescanned = await ScanAsync();
             if (rescanned)
             {
-                foreach (var row in Items)
+                _isUpdatingSelection = true;
+                try
                 {
-                    string error;
-                    if (errors.TryGetValue(row.SourcePath, out error)) row.SetCopyError(error);
+                    PreviewSelectionState.RestoreAfterCopy(Items, selectionBeforeCopy, errors);
                 }
+                finally
+                {
+                    _isUpdatingSelection = false;
+                }
+                OnPropertyChanged(nameof(CanCopy));
                 SetMessage(
                     string.Format("コピー完了: 成功 {0} / エラー {1}{2}。再スキャンしました。",
                         copied, failed, result.Cancelled ? " / キャンセル" : string.Empty),
@@ -349,6 +358,23 @@ namespace PhotoImporter.App
             SetMessage(_isScanningExif
                 ? "Exifスキャンを停止しています。現在のファイルを完了してキャッシュを保存します..."
                 : "キャンセルしています...", Brushes.DimGray);
+        }
+
+        private void SelectAll_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            var select = SelectAllState != true;
+            _isUpdatingSelection = true;
+            try
+            {
+                PreviewSelectionState.SetAllCopyable(Items, select);
+            }
+            finally
+            {
+                _isUpdatingSelection = false;
+            }
+            OnPropertyChanged(nameof(CanCopy));
+            UpdateSummary();
         }
 
         private void UpdateCopyProgress(CopyProgress progress)
@@ -547,6 +573,7 @@ namespace PhotoImporter.App
         {
             if (e.PropertyName == nameof(PreviewItem.IsSelected))
             {
+                if (_isUpdatingSelection) return;
                 OnPropertyChanged(nameof(CanCopy));
                 UpdateSummary();
             }
@@ -563,6 +590,8 @@ namespace PhotoImporter.App
                 rows.Count(item => item.DestinationStatus == DestinationStatus.Overwrite),
                 rows.Count(item => item.DestinationStatus == DestinationStatus.Imported),
                 Items.Count(item => item.IsScanError || item.DestinationStatus == DestinationStatus.Conflict));
+            OnPropertyChanged(nameof(SelectAllState));
+            OnPropertyChanged(nameof(CanSelectAll));
         }
 
         private void SettingsChanged()
@@ -570,6 +599,7 @@ namespace PhotoImporter.App
             _previewIsCurrent = false;
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
+            OnPropertyChanged(nameof(CanSelectAll));
         }
 
         private void ChangeExifCacheRoot(string newRoot, bool useDefault)
@@ -697,6 +727,7 @@ namespace PhotoImporter.App
             _isCopying = copying;
             OnPropertyChanged(nameof(CanEditSettings));
             OnPropertyChanged(nameof(CanSelectItems));
+            OnPropertyChanged(nameof(CanSelectAll));
             OnPropertyChanged(nameof(CanCancel));
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
@@ -1047,7 +1078,7 @@ namespace PhotoImporter.App
             MetadataResult = metadataResult;
             MetadataSourcePath = metadataSourcePath;
             SequenceNumber = sequenceNumber;
-            _isSelected = copyPlan != null;
+            _isSelected = CanCopy;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -1060,7 +1091,7 @@ namespace PhotoImporter.App
         public PhotoMetadataReadResult MetadataResult { get; }
         public string MetadataSourcePath { get; }
         public int? SequenceNumber { get; }
-        public bool CanCopy => CopyPlan != null && !IsScanError;
+        public bool CanCopy => CopyPlan != null && !IsScanError && _copyError == null;
         public bool IsScanError { get; private set; }
         public string ErrorMessage { get; private set; }
         public bool IsSelected
@@ -1069,7 +1100,12 @@ namespace PhotoImporter.App
             set
             {
                 var next = CanCopy && value;
-                if (_isSelected == next) return;
+                if (_isSelected == next)
+                {
+                    if (value != next)
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+                    return;
+                }
                 _isSelected = next;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
             }
@@ -1099,15 +1135,58 @@ namespace PhotoImporter.App
 
         public void SetCopyError(string error)
         {
-            _copyError = error;
+            _copyError = string.IsNullOrWhiteSpace(error) ? "不明なコピーエラー" : error;
             _isSelected = false;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCopy)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
         }
 
         public static PreviewItem ForScanError(string sourcePath, string message) =>
             new PreviewItem(sourcePath, string.Empty, DestinationStatus.Conflict, null)
             { IsScanError = true, ErrorMessage = message };
+    }
+
+    internal static class PreviewSelectionState
+    {
+        public static bool? GetSelectAllState(IEnumerable<PreviewItem> items)
+        {
+            var copyableItems = items.Where(item => item.CanCopy).ToList();
+            if (copyableItems.Count == 0 || copyableItems.All(item => !item.IsSelected)) return false;
+            return copyableItems.All(item => item.IsSelected) ? true : (bool?)null;
+        }
+
+        public static void SetAllCopyable(IEnumerable<PreviewItem> items, bool isSelected)
+        {
+            foreach (var item in items.Where(item => item.CanCopy))
+                item.IsSelected = isSelected;
+        }
+
+        public static IReadOnlyDictionary<string, bool> Capture(IEnumerable<PreviewItem> items) =>
+            items.ToDictionary(
+                item => item.SourcePath,
+                item => item.IsSelected,
+                StringComparer.OrdinalIgnoreCase);
+
+        public static void RestoreAfterCopy(
+            IEnumerable<PreviewItem> items,
+            IReadOnlyDictionary<string, bool> previousSelection,
+            IReadOnlyDictionary<string, string> copyErrors)
+        {
+            foreach (var item in items)
+            {
+                string error;
+                if (copyErrors.TryGetValue(item.SourcePath, out error))
+                {
+                    item.SetCopyError(error);
+                    continue;
+                }
+
+                bool wasSelected;
+                if (previousSelection.TryGetValue(item.SourcePath, out wasSelected))
+                    item.IsSelected = wasSelected;
+            }
+        }
     }
 
     internal sealed class SourceScanResult

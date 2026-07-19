@@ -5,6 +5,11 @@
         MinHeight="680" MinWidth="1180"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
+        <Style x:Key="CopyTargetCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="IsEnabled" Value="{Binding CanCopy}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
         <DataTemplate x:Key="TokenDetailTemplate">
             <Border BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                     BorderThickness="0,0,0,1" Padding="0,7">
@@ -199,7 +204,24 @@
                   GridLinesVisibility="Horizontal" EnableRowVirtualization="True"
                   IsEnabled="{Binding CanSelectItems}">
             <DataGrid.Columns>
-                <DataGridCheckBoxColumn Header="対象" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="56" />
+                <DataGridCheckBoxColumn Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                        ElementStyle="{StaticResource CopyTargetCheckBoxStyle}"
+                                        EditingElementStyle="{StaticResource CopyTargetCheckBoxStyle}"
+                                        Width="80">
+                    <DataGridCheckBoxColumn.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox IsThreeState="True"
+                                      IsChecked="{Binding DataContext.SelectAllState, RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Mode=OneWay}"
+                                      IsEnabled="{Binding DataContext.CanSelectAll, RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}}"
+                                      Click="SelectAll_Click"
+                                      Margin="0,0,6,0"
+                                      VerticalAlignment="Center"
+                                      AutomationProperties.Name="コピー可能な項目をすべて選択または解除"
+                                      ToolTip="コピー可能な項目をすべて選択／解除" />
+                            <TextBlock Text="対象" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DataGridCheckBoxColumn.Header>
+                </DataGridCheckBoxColumn>
                 <DataGridTextColumn Header="コピー元" Binding="{Binding SourcePath}" Width="2*" IsReadOnly="True" />
                 <DataGridTextColumn Header="コピー先（予定）" Binding="{Binding DestinationPath}" Width="3*" IsReadOnly="True" />
                 <DataGridTextColumn Header="状態" Binding="{Binding Status}" Width="180" IsReadOnly="True" />
