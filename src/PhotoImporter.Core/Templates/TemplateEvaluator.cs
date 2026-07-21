@@ -185,7 +185,7 @@ namespace PhotoImporter.Core.Templates
                     case TemplateTokenKind.Height:
                         int? orientedWidth;
                         int? orientedHeight;
-                        GetOrientedDimensions(context.Metadata, out orientedWidth, out orientedHeight);
+                        PhotoMetadataValues.GetOrientedDimensions(context.Metadata, out orientedWidth, out orientedHeight);
                         output.Append(FormatOptionalNumber(
                             part.Token.Value == TemplateTokenKind.Width ? orientedWidth : orientedHeight,
                             part.Format, part));
@@ -334,33 +334,6 @@ namespace PhotoImporter.Core.Templates
             if (sanitized.Length == 0) sanitized = "Unknown";
             if (ReservedDeviceName.IsMatch(sanitized)) sanitized = "_" + sanitized;
             return sanitized;
-        }
-
-        private static void GetOrientedDimensions(PhotoMetadata metadata, out int? width, out int? height)
-        {
-            if (metadata.DecodedWidth.HasValue && metadata.DecodedHeight.HasValue)
-            {
-                width = metadata.DecodedWidth;
-                height = metadata.DecodedHeight;
-            }
-            else if (metadata.ExifWidth.HasValue && metadata.ExifHeight.HasValue)
-            {
-                width = metadata.ExifWidth;
-                height = metadata.ExifHeight;
-            }
-            else
-            {
-                width = null;
-                height = null;
-                return;
-            }
-
-            if (metadata.Orientation >= 5 && metadata.Orientation <= 8)
-            {
-                var temporary = width;
-                width = height;
-                height = temporary;
-            }
         }
 
         private static string FormatOptionalNumber<T>(T? value, string format, TemplatePart part)

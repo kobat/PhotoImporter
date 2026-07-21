@@ -14,13 +14,6 @@ namespace PhotoImporter.Core.Metadata
 
     public sealed class RawJpegAnalysisPlan
     {
-        private static readonly HashSet<string> JpegExtensions = new HashSet<string>(
-            new[] { ".jpg", ".jpeg" }, StringComparer.OrdinalIgnoreCase);
-
-        private static readonly HashSet<string> RawExtensions = new HashSet<string>(
-            new[] { ".arw", ".cr2", ".cr3", ".dng", ".nef", ".nrw", ".orf", ".raf", ".rw2", ".pef", ".srw" },
-            StringComparer.OrdinalIgnoreCase);
-
         private readonly IReadOnlyDictionary<string, string> _analysisSourceByTarget;
 
         private RawJpegAnalysisPlan(
@@ -85,7 +78,7 @@ namespace PhotoImporter.Core.Metadata
             return (Path.GetDirectoryName(path) ?? string.Empty) + "\0" + Path.GetFileNameWithoutExtension(path);
         }
 
-        private static bool IsJpeg(string path) => JpegExtensions.Contains(Path.GetExtension(path));
-        private static bool IsRaw(string path) => RawExtensions.Contains(Path.GetExtension(path));
+        private static bool IsJpeg(string path) => PhotoFileClassifier.IsJpeg(path);
+        private static bool IsRaw(string path) => PhotoFileClassifier.IsRaw(path);
     }
 }
