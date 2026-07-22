@@ -4,7 +4,9 @@ using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using Xunit;
 
 namespace PhotoImporter.Core.Tests
@@ -132,6 +134,131 @@ namespace PhotoImporter.Core.Tests
             Assert.True(second.IsSelected);
             Assert.False(imported.IsSelected);
         }
+
+        [Fact]
+        public void ApplyFilter_UnchecksOnlyHiddenCopyableItemsByDefault()
+        {
+            var visible = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hidden = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            var imported = CreateItem("imported.jpg", DestinationStatus.Imported, false);
+            var state = CreateCollectionState(visible, hidden, imported);
+
+            state.ApplyFilter(item => item != hidden);
+
+            Assert.True(visible.IsSelected);
+            Assert.False(hidden.IsSelected);
+            Assert.False(imported.IsSelected);
+            Assert.Equal(new[] { visible, imported }, state.VisibleItems.ToArray());
+        }
+
+        [Fact]
+        public void KeepHiddenMode_PreservesHiddenSelectionAndCountsCopyTargetsFromAllItems()
+        {
+            var visible = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hidden = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            var state = CreateCollectionState(visible, hidden);
+            state.SetUncheckHiddenItems(false);
+
+            state.ApplyFilter(item => item == visible);
+
+            var counts = state.GetCounts();
+            Assert.True(hidden.IsSelected);
+            Assert.Equal(1, counts.Visible);
+            Assert.Equal(2, counts.Total);
+            Assert.Equal(2, counts.Selected);
+            Assert.Equal(1, counts.HiddenSelected);
+            Assert.Equal(new[] { visible, hidden }, state.CopyTargets.ToArray());
+        }
+
+        [Fact]
+        public void EnablingUncheckMode_WithActiveFilterImmediatelyUnchecksHiddenItems()
+        {
+            var visible = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hidden = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            var state = CreateCollectionState(visible, hidden);
+            state.SetUncheckHiddenItems(false);
+            state.ApplyFilter(item => item == visible);
+
+            state.SetUncheckHiddenItems(true);
+
+            Assert.True(visible.IsSelected);
+            Assert.False(hidden.IsSelected);
+        }
+
+        [Fact]
+        public void VisibleSelectAll_ChangesOnlyVisibleCopyableItems()
+        {
+            var visible = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hidden = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            var state = CreateCollectionState(visible, hidden);
+            state.SetUncheckHiddenItems(false);
+            state.ApplyFilter(item => item == visible);
+
+            state.SetAllVisibleCopyable(false);
+
+            Assert.False(visible.IsSelected);
+            Assert.True(hidden.IsSelected);
+            Assert.False(state.GetVisibleSelectAllState());
+        }
+
+        [Fact]
+        public void ClearingFilter_DoesNotRestoreSelectionRemovedByFilter()
+        {
+            var visible = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hidden = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            var state = CreateCollectionState(visible, hidden);
+            state.ApplyFilter(item => item == visible);
+
+            state.ApplyFilter(null);
+
+            Assert.Equal(2, state.GetCounts().Visible);
+            Assert.False(hidden.IsSelected);
+        }
+
+        [Fact]
+        public void RestoreAfterCopy_UsesAllItemsWhileViewRemainsFiltered()
+        {
+            var visibleBefore = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hiddenBefore = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            hiddenBefore.IsSelected = false;
+            var selection = PreviewSelectionState.Capture(new[] { visibleBefore, hiddenBefore });
+            var visibleAfter = CreateItem("visible.jpg", DestinationStatus.NotImported, true);
+            var hiddenAfter = CreateItem("hidden.jpg", DestinationStatus.NotImported, true);
+            var state = CreateCollectionState(visibleAfter, hiddenAfter);
+            state.SetUncheckHiddenItems(false);
+            state.ApplyFilter(item => item == visibleAfter);
+
+            PreviewSelectionState.RestoreAfterCopy(
+                state.Items,
+                selection,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+
+            Assert.True(visibleAfter.IsSelected);
+            Assert.False(hiddenAfter.IsSelected);
+            Assert.Equal(new[] { visibleAfter }, state.VisibleItems.ToArray());
+        }
+
+        [Fact]
+        public void RefreshAfterRescan_ReappliesFilterAndHiddenSelectionPolicy()
+        {
+            var state = CreateCollectionState(
+                CreateItem("old-visible.jpg", DestinationStatus.NotImported, true));
+            state.ApplyFilter(item => item.SourcePath.Contains("visible"));
+            state.Items.Clear();
+            var visible = CreateItem("new-visible.jpg", DestinationStatus.NotImported, true);
+            var hidden = CreateItem("new-hidden.jpg", DestinationStatus.NotImported, true);
+            state.Items.Add(visible);
+            state.Items.Add(hidden);
+
+            state.Refresh();
+
+            Assert.Equal(new[] { visible }, state.VisibleItems.ToArray());
+            Assert.True(visible.IsSelected);
+            Assert.False(hidden.IsSelected);
+        }
+
+        private static PreviewItemCollectionState CreateCollectionState(params PreviewItem[] items) =>
+            new PreviewItemCollectionState(new ObservableCollection<PreviewItem>(items));
 
         private static PreviewItem CreateItem(
             string sourcePath,

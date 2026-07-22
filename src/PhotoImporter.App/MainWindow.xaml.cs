@@ -43,6 +43,7 @@ namespace PhotoImporter.App
         private CancellationTokenSource _scanCancellation;
         private PreviewItem _selectedPreviewItem;
         private bool _isUpdatingSelection;
+        private PreviewItemCollectionState _itemCollectionState;
 
         public MainWindow()
         {
@@ -63,6 +64,7 @@ namespace PhotoImporter.App
             }
 
             InitializeComponent();
+            _itemCollectionState = new PreviewItemCollectionState(Items);
             DataContext = this;
             Closing += MainWindow_Closing;
             if (settingsWarning != null) SetMessage(settingsWarning, Brushes.DarkGoldenrod);
@@ -71,6 +73,7 @@ namespace PhotoImporter.App
         public event PropertyChangedEventHandler PropertyChanged;
 
         public ObservableCollection<PreviewItem> Items { get; } = new ObservableCollection<PreviewItem>();
+        public ICollectionView ItemsView => _itemCollectionState.View;
         public IReadOnlyList<TokenDetailItem> FileSystemTokenDetails { get; }
         public IReadOnlyList<TokenDetailItem> ExifTokenDetails { get; }
 
@@ -166,13 +169,47 @@ namespace PhotoImporter.App
         public Visibility ProgressVisibility => _isCopying || _isScanningExif ? Visibility.Visible : Visibility.Collapsed;
         public bool CanEditSettings => !_isBusy;
         public bool CanSelectItems => !_isBusy;
-        public bool CanSelectAll => !_isBusy && Items.Any(item => item.CanCopy);
-        public bool? SelectAllState => PreviewSelectionState.GetSelectAllState(Items);
+        public bool CanSelectAll => !_isBusy && _itemCollectionState.VisibleItems.Any(item => item.CanCopy);
+        public bool? SelectAllState => _itemCollectionState.GetVisibleSelectAllState();
         public bool CanCancel => _isCopying || _isScanningExif;
         public bool CanScan => !_isBusy && !string.IsNullOrWhiteSpace(SourceFolder) &&
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
                                !string.IsNullOrWhiteSpace(TemplateText);
-        public bool CanCopy => !_isBusy && _previewIsCurrent && Items.Any(item => item.IsSelected && item.CanCopy);
+        public bool CanCopy => !_isBusy && _previewIsCurrent && _itemCollectionState.CopyTargets.Any();
+        public string CopyButtonText => string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
+        public string ViewSelectionSummary
+        {
+            get
+            {
+                var counts = _itemCollectionState.GetCounts();
+                return string.Format(
+                    "表示 {0} / 全 {1}　チェック {2}（表示外 {3}）",
+                    counts.Visible,
+                    counts.Total,
+                    counts.Selected,
+                    counts.HiddenSelected);
+            }
+        }
+
+        public bool UncheckHiddenItems
+        {
+            get => _itemCollectionState.UncheckHiddenItems;
+            set
+            {
+                if (_itemCollectionState.UncheckHiddenItems == value) return;
+                _isUpdatingSelection = true;
+                try
+                {
+                    _itemCollectionState.SetUncheckHiddenItems(value);
+                }
+                finally
+                {
+                    _isUpdatingSelection = false;
+                }
+                OnPropertyChanged();
+                UpdateSummary();
+            }
+        }
 
         private void SelectSource_Click(object sender, RoutedEventArgs e) =>
             SourceFolder = SelectFolder(SourceFolder, "コピー元フォルダーを選択してください") ?? SourceFolder;
@@ -257,6 +294,7 @@ namespace PhotoImporter.App
                     row.PropertyChanged += PreviewItem_PropertyChanged;
                     Items.Add(row);
                 }
+                RefreshItemsView();
 
                 _previewIsCurrent = true;
                 UpdateSummary();
@@ -288,7 +326,7 @@ namespace PhotoImporter.App
 
         private async void Copy_Click(object sender, RoutedEventArgs e)
         {
-            var selected = Items.Where(item => item.IsSelected && item.CanCopy).ToList();
+            var selected = _itemCollectionState.CopyTargets.ToList();
             if (selected.Count == 0) return;
             var selectionBeforeCopy = PreviewSelectionState.Capture(Items);
 
@@ -337,6 +375,7 @@ namespace PhotoImporter.App
                 try
                 {
                     PreviewSelectionState.RestoreAfterCopy(Items, selectionBeforeCopy, errors);
+                    _itemCollectionState.Refresh();
                 }
                 finally
                 {
@@ -367,7 +406,7 @@ namespace PhotoImporter.App
             _isUpdatingSelection = true;
             try
             {
-                PreviewSelectionState.SetAllCopyable(Items, select);
+                _itemCollectionState.SetAllVisibleCopyable(select);
             }
             finally
             {
@@ -579,6 +618,37 @@ namespace PhotoImporter.App
             }
         }
 
+        internal void ApplyPreviewFilter(Predicate<PreviewItem> filter)
+        {
+            _isUpdatingSelection = true;
+            try
+            {
+                _itemCollectionState.ApplyFilter(filter);
+            }
+            finally
+            {
+                _isUpdatingSelection = false;
+            }
+
+            if (SelectedPreviewItem != null &&
+                !_itemCollectionState.VisibleItems.Contains(SelectedPreviewItem))
+                SelectedPreviewItem = null;
+            UpdateSummary();
+        }
+
+        private void RefreshItemsView()
+        {
+            _isUpdatingSelection = true;
+            try
+            {
+                _itemCollectionState.Refresh();
+            }
+            finally
+            {
+                _isUpdatingSelection = false;
+            }
+        }
+
         private void UpdateSummary()
         {
             var rows = Items.Where(item => !item.IsScanError).ToList();
@@ -592,6 +662,9 @@ namespace PhotoImporter.App
                 Items.Count(item => item.IsScanError || item.DestinationStatus == DestinationStatus.Conflict));
             OnPropertyChanged(nameof(SelectAllState));
             OnPropertyChanged(nameof(CanSelectAll));
+            OnPropertyChanged(nameof(CanCopy));
+            OnPropertyChanged(nameof(CopyButtonText));
+            OnPropertyChanged(nameof(ViewSelectionSummary));
         }
 
         private void SettingsChanged()

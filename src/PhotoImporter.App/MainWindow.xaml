@@ -191,13 +191,31 @@
             <TextBlock Text="コピー設定" VerticalAlignment="Center" />
             <CheckBox Grid.Column="1" Content="既存ファイルを上書きする"
                       IsEnabled="{Binding CanEditSettings}" IsChecked="{Binding OverwriteExisting}" />
-            <Button Grid.Column="2" Content="コピー" MinWidth="100" Margin="8,0,0,0"
+            <Button Grid.Column="2" Content="{Binding CopyButtonText}" MinWidth="100" Margin="8,0,0,0"
                     IsEnabled="{Binding CanCopy}" Click="Copy_Click" />
             <Button Grid.Column="3" Content="キャンセル" MinWidth="100" Margin="8,0,0,0"
                     IsEnabled="{Binding CanCancel}" Click="Cancel_Click" />
         </Grid>
 
-        <DataGrid Grid.Row="7" ItemsSource="{Binding Items}"
+        <Grid Grid.Row="7">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding ViewSelectionSummary}" FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+                <CheckBox Grid.Column="1"
+                          Content="絞り込みで非表示になった項目のチェックを外す"
+                          IsChecked="{Binding UncheckHiddenItems, Mode=TwoWay}"
+                          IsEnabled="{Binding CanSelectItems}"
+                          VerticalAlignment="Center" />
+            </Grid>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding ItemsView}"
                   SelectedItem="{Binding SelectedPreviewItem, Mode=TwoWay}"
                   AutoGenerateColumns="False"
                   CanUserAddRows="False" HeadersVisibility="Column"
@@ -227,6 +245,7 @@
                 <DataGridTextColumn Header="状態" Binding="{Binding Status}" Width="180" IsReadOnly="True" />
             </DataGrid.Columns>
         </DataGrid>
+        </Grid>
 
         <GridSplitter Grid.Row="1" Grid.RowSpan="7" Grid.Column="1"
                       Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
