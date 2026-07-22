@@ -1,5 +1,6 @@
 using PhotoImporter.App;
 using PhotoImporter.Core.Copying;
+using PhotoImporter.Core.Filtering;
 using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
 using System;
@@ -255,6 +256,20 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(new[] { visible }, state.VisibleItems.ToArray());
             Assert.True(visible.IsSelected);
             Assert.False(hidden.IsSelected);
+        }
+
+        [Fact]
+        public void ScanError_CanBeEvaluatedByExifFilterAfterLazyScan()
+        {
+            var item = PreviewItem.ForScanError("unreadable.jpg", "access denied");
+            var prepared = new FilterSet(new FilterCondition[]
+            {
+                new ChoiceFilterCondition<FilterExifReadStatus>(
+                    FilterField.ExifReadStatus,
+                    new[] { FilterExifReadStatus.ReadError })
+            }).Prepare().Filter;
+
+            Assert.True(prepared.Matches(item.CreateFilterCandidate()));
         }
 
         private static PreviewItemCollectionState CreateCollectionState(params PreviewItem[] items) =>

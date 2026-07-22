@@ -1,4 +1,5 @@
 using PhotoImporter.Core.Copying;
+using PhotoImporter.Core.Filtering;
 using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Settings;
 using PhotoImporter.Core.Templates;
@@ -44,6 +45,8 @@ namespace PhotoImporter.App
         private PreviewItem _selectedPreviewItem;
         private bool _isUpdatingSelection;
         private PreviewItemCollectionState _itemCollectionState;
+        private PreparedFilter _appliedFilter;
+        private int _appliedFilterCount;
 
         public MainWindow()
         {
@@ -65,6 +68,7 @@ namespace PhotoImporter.App
 
             InitializeComponent();
             _itemCollectionState = new PreviewItemCollectionState(Items);
+            FilterFieldOptions = FilterFieldOption.CreateAll();
             DataContext = this;
             Closing += MainWindow_Closing;
             if (settingsWarning != null) SetMessage(settingsWarning, Brushes.DarkGoldenrod);
@@ -73,6 +77,8 @@ namespace PhotoImporter.App
         public event PropertyChangedEventHandler PropertyChanged;
 
         public ObservableCollection<PreviewItem> Items { get; } = new ObservableCollection<PreviewItem>();
+        public ObservableCollection<FilterConditionEditor> FilterConditions { get; } = new ObservableCollection<FilterConditionEditor>();
+        internal IReadOnlyList<FilterFieldOption> FilterFieldOptions { get; private set; }
         public ICollectionView ItemsView => _itemCollectionState.View;
         public IReadOnlyList<TokenDetailItem> FileSystemTokenDetails { get; }
         public IReadOnlyList<TokenDetailItem> ExifTokenDetails { get; }
@@ -176,6 +182,20 @@ namespace PhotoImporter.App
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
                                !string.IsNullOrWhiteSpace(TemplateText);
         public bool CanCopy => !_isBusy && _previewIsCurrent && _itemCollectionState.CopyTargets.Any();
+        public bool CanEditFilters => !_isBusy && _previewIsCurrent;
+        public bool CanApplyFilter => CanEditFilters && FilterConditions.All(item => item.IsValid);
+        public int AppliedFilterCount
+        {
+            get => _appliedFilterCount;
+            private set
+            {
+                if (_appliedFilterCount == value) return;
+                _appliedFilterCount = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(FilterSummary));
+            }
+        }
+        public string FilterSummary => string.Format("適用済み条件 {0} 件", AppliedFilterCount);
         public string CopyButtonText => string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
         public string ViewSelectionSummary
         {
@@ -260,7 +280,8 @@ namespace PhotoImporter.App
                 var useExifCache = UseExifCache;
                 var readExifInformation = ReadExifInformation;
                 var exifCacheRoot = ExifCacheRoot;
-                var shouldReadExif = parseResult.Template.RequiresExif || readExifInformation;
+                var shouldReadExif = parseResult.Template.RequiresExif || readExifInformation ||
+                                     (_appliedFilter != null && _appliedFilter.RequiresExif);
                 IProgress<PhotoMetadataScanProgress> exifProgress = null;
                 if (shouldReadExif)
                 {
@@ -285,7 +306,7 @@ namespace PhotoImporter.App
                     overwrite,
                     rawJpegAnalysisMode,
                     useExifCache,
-                    readExifInformation,
+                    shouldReadExif,
                     exifCacheRoot,
                     exifProgress,
                     cancellationToken), cancellationToken);
@@ -636,6 +657,183 @@ namespace PhotoImporter.App
             UpdateSummary();
         }
 
+        private void AddFilterCondition_Click(object sender, RoutedEventArgs e)
+        {
+            var editor = new FilterConditionEditor(FilterFieldOptions);
+            editor.PropertyChanged += FilterCondition_PropertyChanged;
+            FilterConditions.Add(editor);
+            OnPropertyChanged(nameof(CanApplyFilter));
+        }
+
+        private void RemoveFilterCondition_Click(object sender, RoutedEventArgs e)
+        {
+            var editor = (sender as FrameworkElement)?.DataContext as FilterConditionEditor;
+            if (editor == null) return;
+            editor.PropertyChanged -= FilterCondition_PropertyChanged;
+            FilterConditions.Remove(editor);
+            OnPropertyChanged(nameof(CanApplyFilter));
+        }
+
+        private async void ApplyFilter_Click(object sender, RoutedEventArgs e)
+        {
+            var conditions = new List<FilterCondition>();
+            foreach (var editor in FilterConditions)
+            {
+                FilterCondition condition;
+                string error;
+                if (!editor.TryBuild(out condition, out error))
+                {
+                    OnPropertyChanged(nameof(CanApplyFilter));
+                    return;
+                }
+                conditions.Add(condition);
+            }
+
+            var preparation = new FilterSet(conditions).Prepare();
+            if (!preparation.IsValid) return;
+            var prepared = preparation.Filter;
+
+            if (prepared.RequiresExif && Items.Any(item => !item.IsScanError && item.MetadataResult == null))
+            {
+                if (!await LoadExifForFilterAsync(prepared, conditions.Count)) return;
+            }
+            else
+            {
+                TryCommitFilter(prepared, conditions.Count);
+            }
+        }
+
+        private void ClearFilter_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var editor in FilterConditions) editor.PropertyChanged -= FilterCondition_PropertyChanged;
+            FilterConditions.Clear();
+            _appliedFilter = null;
+            AppliedFilterCount = 0;
+            ApplyPreviewFilter(null);
+            SetMessage("一覧フィルターをクリアしました。", Brushes.DimGray);
+            OnPropertyChanged(nameof(CanApplyFilter));
+        }
+
+        private void FilterCondition_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(FilterConditionEditor.IsValid) ||
+                e.PropertyName == nameof(FilterConditionEditor.ValidationMessage))
+                OnPropertyChanged(nameof(CanApplyFilter));
+        }
+
+        private bool TryCommitFilter(PreparedFilter prepared, int conditionCount)
+        {
+            try
+            {
+                foreach (var item in Items) prepared.Matches(item.CreateFilterCandidate());
+                _appliedFilter = conditionCount == 0 ? null : prepared;
+                AppliedFilterCount = conditionCount;
+                ApplyPreviewFilter(_appliedFilter == null
+                    ? (Predicate<PreviewItem>)null
+                    : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
+                SetMessage(conditionCount == 0
+                    ? "条件なしで全項目を表示しました。"
+                    : string.Format("一覧フィルターを適用しました（{0} 条件）。", conditionCount), Brushes.DimGray);
+                return true;
+            }
+            catch (FilterEvaluationException ex)
+            {
+                SetMessage("フィルター評価エラー: " + ex.Message, Brushes.Firebrick);
+                return false;
+            }
+        }
+
+        private async Task<bool> LoadExifForFilterAsync(PreparedFilter prepared, int conditionCount)
+        {
+            CancellationTokenSource scanCancellation = null;
+            SetBusy(true, false);
+            try
+            {
+                var sourceRoot = Path.GetFullPath(SourceFolder);
+                var destinationRoot = Path.GetFullPath(DestinationFolder);
+                ValidateRoots(sourceRoot, destinationRoot);
+                var parseResult = TemplateParser.Parse(TemplateText);
+                if (!parseResult.IsValid)
+                {
+                    ShowTemplateError(parseResult.Error);
+                    return false;
+                }
+
+                scanCancellation = new CancellationTokenSource();
+                _scanCancellation = scanCancellation;
+                _isScanningExif = true;
+                _exifCacheHits = 0;
+                ProgressPercent = 0;
+                ProgressText = "Exifスキャン準備中...";
+                OnPropertyChanged(nameof(ProgressVisibility));
+                OnPropertyChanged(nameof(CanCancel));
+                SetMessage("フィルターに必要なExif情報を読み取っています。現在の一覧は完了まで維持されます...", Brushes.DimGray);
+                var progress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
+                var token = scanCancellation.Token;
+                var preview = await Task.Run(() => BuildPreview(
+                    sourceRoot,
+                    destinationRoot,
+                    parseResult.Template,
+                    OverwriteExisting,
+                    AnalyzeJpegOnlyForRawJpegPair ? RawJpegAnalysisMode.JpegOnlyForPair : RawJpegAnalysisMode.AnalyzeBoth,
+                    UseExifCache,
+                    true,
+                    ExifCacheRoot,
+                    progress,
+                    token), token);
+
+                foreach (var item in preview.Items) prepared.Matches(item.CreateFilterCandidate());
+                var selection = PreviewSelectionState.Capture(Items);
+                ReplacePreviewItems(preview.Items, selection);
+                _appliedFilter = conditionCount == 0 ? null : prepared;
+                AppliedFilterCount = conditionCount;
+                ApplyPreviewFilter(item => _appliedFilter.Matches(item.CreateFilterCandidate()));
+                SetMessage(preview.Warnings.Count == 0
+                    ? string.Format("Exif情報を読み込み、一覧フィルターを適用しました（{0} 条件）。", conditionCount)
+                    : string.Join(" ", preview.Warnings),
+                    preview.Warnings.Count == 0 ? Brushes.DimGray : Brushes.DarkGoldenrod);
+                return true;
+            }
+            catch (OperationCanceledException) when (scanCancellation != null && scanCancellation.IsCancellationRequested)
+            {
+                SetMessage("Exifスキャンを停止しました。直前の一覧とフィルターを維持しています。", Brushes.DimGray);
+            }
+            catch (FilterEvaluationException ex)
+            {
+                SetMessage("フィルター評価エラー: " + ex.Message + " 直前の一覧を維持しています。", Brushes.Firebrick);
+            }
+            catch (Exception ex)
+            {
+                SetMessage(ex.Message + " 直前の一覧とフィルターを維持しています。", Brushes.Firebrick);
+            }
+            finally
+            {
+                _isScanningExif = false;
+                if (ReferenceEquals(_scanCancellation, scanCancellation)) _scanCancellation = null;
+                scanCancellation?.Dispose();
+                SetBusy(false, false);
+            }
+            return false;
+        }
+
+        private void ReplacePreviewItems(
+            IEnumerable<PreviewItem> replacement,
+            IReadOnlyDictionary<string, bool> selection = null)
+        {
+            SelectedPreviewItem = null;
+            Items.Clear();
+            foreach (var row in replacement)
+            {
+                bool isSelected;
+                if (selection != null && selection.TryGetValue(row.SourcePath, out isSelected))
+                    row.IsSelected = isSelected;
+                row.PropertyChanged += PreviewItem_PropertyChanged;
+                Items.Add(row);
+            }
+            RefreshItemsView();
+            UpdateSummary();
+        }
+
         private void RefreshItemsView()
         {
             _isUpdatingSelection = true;
@@ -673,6 +871,8 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(CanSelectAll));
+            OnPropertyChanged(nameof(CanEditFilters));
+            OnPropertyChanged(nameof(CanApplyFilter));
         }
 
         private void ChangeExifCacheRoot(string newRoot, bool useDefault)
@@ -805,6 +1005,8 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(ProgressVisibility));
+            OnPropertyChanged(nameof(CanEditFilters));
+            OnPropertyChanged(nameof(CanApplyFilter));
             if (!copying && !_isScanningExif) ProgressText = string.Empty;
         }
 
@@ -1128,6 +1330,8 @@ namespace PhotoImporter.App
 
     public sealed class PreviewItem : INotifyPropertyChanged
     {
+        private static readonly PhotoMetadataReadResult ScanErrorMetadataResult =
+            PhotoMetadataReadResult.ReadError(new IOException("File information could not be read during scanning."));
         private bool _isSelected;
         private string _copyError;
 
@@ -1213,6 +1417,34 @@ namespace PhotoImporter.App
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCopy)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+
+        internal FilterCandidate CreateFilterCandidate()
+        {
+            var context = TemplateContext;
+            return new FilterCandidate(
+                context == null ? null : context.OriginalName,
+                context == null ? (DateTime?)null : context.ModifiedDate,
+                context == null ? (long?)null : context.FileSize,
+                context == null ? null : context.SourceRelativeDirectory,
+                context == null ? (bool?)null : context.IsReadOnly,
+                SequenceNumber,
+                GetFilterCopyStatus(),
+                MetadataResult ?? (IsScanError ? ScanErrorMetadataResult : null),
+                !IsScanError);
+        }
+
+        private FilterCopyStatus GetFilterCopyStatus()
+        {
+            if (IsScanError) return FilterCopyStatus.ScanError;
+            if (_copyError != null) return FilterCopyStatus.CopyError;
+            switch (DestinationStatus)
+            {
+                case DestinationStatus.Overwrite: return FilterCopyStatus.Overwrite;
+                case DestinationStatus.Imported: return FilterCopyStatus.Imported;
+                case DestinationStatus.Conflict: return FilterCopyStatus.Conflict;
+                default: return FilterCopyStatus.NotImported;
+            }
         }
 
         public static PreviewItem ForScanError(string sourcePath, string message) =>
