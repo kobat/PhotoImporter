@@ -10,6 +10,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -71,6 +72,7 @@ namespace PhotoImporter.App
             FilterFieldOptions = FilterFieldOption.CreateAll();
             DataContext = this;
             Closing += MainWindow_Closing;
+            ContentRendered += MainWindow_ContentRendered;
             if (settingsWarning != null) SetMessage(settingsWarning, Brushes.DarkGoldenrod);
         }
 
@@ -401,25 +403,125 @@ namespace PhotoImporter.App
                     StringComparer.OrdinalIgnoreCase);
 
             var rescanned = await ScanAsync();
-            if (rescanned)
+            if (!rescanned)
             {
-                _isUpdatingSelection = true;
-                try
-                {
-                    PreviewSelectionState.RestoreAfterCopy(Items, selectionBeforeCopy, errors);
-                    _itemCollectionState.Refresh();
-                }
-                finally
-                {
-                    _isUpdatingSelection = false;
-                }
-                OnPropertyChanged(nameof(CanCopy));
+                var rescanError = Message;
                 SetMessage(
-                    string.Format("コピー完了: 成功 {0} / エラー {1}{2}。再スキャンしました。",
-                        copied, failed, result.Cancelled ? " / キャンセル" : string.Empty),
-                    failed > 0 ? Brushes.Firebrick : Brushes.DimGray);
-                UpdateSummary();
+                    FormatCopyCompletion(copied, failed, result.Cancelled) +
+                    " コピー後の一覧を更新できませんでした。手動でスキャンしてください。" +
+                    (string.IsNullOrWhiteSpace(rescanError) ? string.Empty : " 詳細: " + rescanError),
+                    Brushes.Firebrick);
+                return;
             }
+
+            string postProcessingError;
+            _isUpdatingSelection = true;
+            try
+            {
+                postProcessingError = CopyPostProcessing.TryRun(
+                    () => PreviewSelectionState.RestoreAfterCopy(Items, selectionBeforeCopy, errors),
+                    () =>
+                    {
+                        _itemCollectionState.Refresh();
+                        UpdateSummary();
+                    });
+            }
+            finally
+            {
+                _isUpdatingSelection = false;
+            }
+
+            OnPropertyChanged(nameof(CanCopy));
+            if (postProcessingError == null)
+            {
+                SetMessage(
+                    FormatCopyCompletion(copied, failed, result.Cancelled) + " 再スキャンしました。",
+                    failed > 0 ? Brushes.Firebrick : Brushes.DimGray);
+            }
+            else
+            {
+                SetMessage(
+                    FormatCopyCompletion(copied, failed, result.Cancelled) +
+                    " コピー後の一覧表示を更新できませんでした。手動でスキャンしてください。詳細: " +
+                    postProcessingError,
+                    Brushes.Firebrick);
+            }
+        }
+
+        private static string FormatCopyCompletion(int copied, int failed, bool cancelled) =>
+            string.Format(
+                "コピー完了: 成功 {0} / エラー {1}{2}。",
+                copied,
+                failed,
+                cancelled ? " / キャンセル" : string.Empty);
+
+        private async void MainWindow_ContentRendered(object sender, EventArgs e)
+        {
+            ContentRendered -= MainWindow_ContentRendered;
+            if (string.IsNullOrWhiteSpace(DestinationFolder)) return;
+
+            try
+            {
+                var destinationRoot = Path.GetFullPath(DestinationFolder);
+                var result = await Task.Run(() => new PartialRecoveryDetector().Scan(destinationRoot));
+                if (result.Candidates.Count > 0)
+                {
+                    MessageBox.Show(
+                        this,
+                        BuildPartialRecoveryMessage(result),
+                        "残存する一時ファイル",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    SetMessage(
+                        string.Format(
+                            "コピー先に残存する一時ファイルを {0} 件検出しました。自動削除せず保全しています。",
+                            result.Candidates.Count),
+                        Brushes.DarkGoldenrod);
+                }
+                else if (result.Warnings.Count > 0)
+                {
+                    SetMessage(
+                        "残存する一時ファイルを完全には検査できませんでした。コピー先の状態と権限を確認してください。",
+                        Brushes.DarkGoldenrod);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetMessage(
+                    "残存する一時ファイルを検査できませんでした: " + ex.Message,
+                    Brushes.DarkGoldenrod);
+            }
+        }
+
+        internal static string BuildPartialRecoveryMessage(PartialRecoveryScanResult result)
+        {
+            if (result == null) throw new ArgumentNullException(nameof(result));
+            var message = new StringBuilder()
+                .AppendFormat(
+                    "コピー先に Photo Importer の命名規則に一致する一時ファイルが {0} 件残っています。",
+                    result.Candidates.Count)
+                .AppendLine()
+                .AppendLine("コピーの成否や対応する正式ファイルは一時名だけでは判断できないため、自動削除・自動昇格はしていません。")
+                .AppendLine()
+                .AppendLine("検出したファイル:");
+
+            const int maximumDisplayedPaths = 12;
+            foreach (var candidate in result.Candidates.Take(maximumDisplayedPaths))
+                message.AppendLine(candidate.Path);
+            if (result.Candidates.Count > maximumDisplayedPaths)
+                message.AppendFormat("ほか {0} 件", result.Candidates.Count - maximumDisplayedPaths).AppendLine();
+
+            message
+                .AppendLine()
+                .AppendLine("状態を確認して、次のように対応してください:")
+                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.Missing))
+                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.MatchesExpectedSource))
+                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.MatchesPreviousSnapshot))
+                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.RequiresComparison))
+                .AppendLine()
+                .Append("元写真が利用できる場合は、元写真を正として手動で再スキャンしてください。");
+
+            return message.ToString();
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
