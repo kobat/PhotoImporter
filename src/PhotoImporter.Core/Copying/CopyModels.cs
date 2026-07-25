@@ -90,14 +90,17 @@ namespace PhotoImporter.Core.Copying
 
     public sealed class CopyBatchResult
     {
-        internal CopyBatchResult(IList<CopyItemResult> items, bool cancelled)
+        internal CopyBatchResult(IList<CopyItemResult> items, bool cancelled, string batchError = null)
         {
             Items = items;
             Cancelled = cancelled;
+            BatchError = batchError;
         }
 
         public IList<CopyItemResult> Items { get; }
         public bool Cancelled { get; }
+        public string BatchError { get; }
+        public bool Aborted => BatchError != null;
     }
 
     public sealed class CopyProgress

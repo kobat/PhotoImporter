@@ -41,6 +41,7 @@ namespace PhotoImporter.Core.Metadata
 
         public static bool IsJpeg(string path) => Classify(path) == PhotoFileType.Jpeg;
         public static bool IsRaw(string path) => Classify(path) == PhotoFileType.Raw;
+        public static bool IsSupported(string path) => Classify(path) != PhotoFileType.Other;
 
         private static HashSet<string> CreateSet(params string[] extensions) =>
             new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);

@@ -306,6 +306,56 @@ namespace PhotoImporter.Core.Tests
                 result.Items.Select(item => item.Status).ToArray());
         }
 
+        [Fact]
+        public void AbortsBatchWithoutPerFileFailuresWhenDestinationRootBecomesUnavailable()
+        {
+            var sourceRoot = Path.Combine(_root, "card");
+            var first = CreateFile("card\\first.jpg", new byte[] { 1 });
+            var second = CreateFile("card\\second.jpg", new byte[] { 2 });
+            var availability = new ControlledRootAvailability(_root);
+            var engine = new CopyEngine(
+                new ManagedCopyOperation(() => availability.Available = false),
+                FailMove,
+                new FileAttributeOperations(),
+                availability);
+
+            var result = engine.Execute(
+                new[]
+                {
+                    CreatePlan(first, Path.Combine(_root, "out", "first.jpg"), null, false),
+                    CreatePlan(second, Path.Combine(_root, "out", "second.jpg"), null, false)
+                },
+                sourceRoot,
+                null,
+                CancellationToken.None);
+
+            Assert.True(result.Aborted);
+            Assert.Contains("コピー先全体", result.BatchError);
+            Assert.Empty(result.Items);
+        }
+
+        [Fact]
+        public void AbortsBatchBeforeCopyWhenSourceRootIsUnavailable()
+        {
+            var source = CreateFile("source-root-lost.jpg", new byte[] { 1 });
+            var availability = new ControlledRootAvailability(_root) { SourceAvailable = false };
+            var engine = new CopyEngine(
+                new ManagedCopyOperation(),
+                FailMove,
+                new FileAttributeOperations(),
+                availability);
+
+            var result = engine.Execute(
+                new[] { CreatePlan(source, Path.Combine(_root, "out", "photo.jpg"), null, false) },
+                @"E:\",
+                null,
+                CancellationToken.None);
+
+            Assert.True(result.Aborted);
+            Assert.Contains("コピー元全体", result.BatchError);
+            Assert.Empty(result.Items);
+        }
+
         private string CreateFile(string relativePath, byte[] bytes)
         {
             var path = Path.Combine(_root, relativePath);
@@ -398,6 +448,26 @@ namespace PhotoImporter.Core.Tests
                     throw new IOException("Simulated attribute restoration failure.");
                 File.SetAttributes(path, attributes);
             }
+        }
+
+        private sealed class ControlledRootAvailability : IRootAvailability
+        {
+            private readonly string _destinationRoot;
+
+            internal ControlledRootAvailability(string destinationRoot)
+            {
+                _destinationRoot = destinationRoot;
+                Available = true;
+                SourceAvailable = true;
+            }
+
+            internal bool Available { get; set; }
+            internal bool SourceAvailable { get; set; }
+
+            public bool IsAvailable(string path) =>
+                string.Equals(path, _destinationRoot, StringComparison.OrdinalIgnoreCase)
+                    ? Available
+                    : SourceAvailable;
         }
     }
 }

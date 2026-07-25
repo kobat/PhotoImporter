@@ -362,6 +362,7 @@ namespace PhotoImporter.App
                 var progress = new Progress<CopyProgress>(UpdateCopyProgress);
                 result = await Task.Run(() => new CopyEngine().Execute(
                     selected.Select(item => item.CopyPlan),
+                    Path.GetFullPath(SourceFolder),
                     progress,
                     _copyCancellation.Token));
             }
@@ -377,6 +378,16 @@ namespace PhotoImporter.App
             }
 
             if (result == null) return;
+            if (result.Aborted)
+            {
+                SetMessage(
+                    string.Format(
+                        "{0}（中止までに成功 {1} 件）",
+                        result.BatchError,
+                        result.Items.Count(item => item.Status == CopyItemStatus.Copied)),
+                    Brushes.Firebrick);
+                return;
+            }
 
             var copied = result.Items.Count(item => item.Status == CopyItemStatus.Copied);
             var failed = result.Items.Count(item => item.Status == CopyItemStatus.Failed);
@@ -492,7 +503,7 @@ namespace PhotoImporter.App
                 destinationTimestampPolicy,
                 overwriteExisting,
                 destinationRoot);
-            var scan = EnumerateSourceFiles(sourceRoot, cancellationToken);
+            var scan = new SourceFileEnumerator().Enumerate(sourceRoot, cancellationToken);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
@@ -593,40 +604,6 @@ namespace PhotoImporter.App
                 catch (TemplateException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString())); }
             }
             return new PreviewBuildResult(result, warnings);
-        }
-
-        private static SourceScanResult EnumerateSourceFiles(
-            string sourceRoot,
-            CancellationToken cancellationToken = default(CancellationToken))
-        {
-            var result = new SourceScanResult();
-            var pending = new Stack<string>();
-            pending.Push(sourceRoot);
-
-            while (pending.Count > 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var directory = pending.Pop();
-                FileSystemInfo[] entries;
-                try { entries = new DirectoryInfo(directory).GetFileSystemInfos(); }
-                catch (UnauthorizedAccessException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, directory), ex.Message)); continue; }
-                catch (IOException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, directory), ex.Message)); continue; }
-
-                foreach (var entry in entries.OrderByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
-                    {
-                        if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                        var childDirectory = entry as DirectoryInfo;
-                        if (childDirectory != null) pending.Push(childDirectory.FullName);
-                        else if (entry is FileInfo) result.Files.Add(entry.FullName);
-                    }
-                    catch (UnauthorizedAccessException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, entry.FullName), ex.Message)); }
-                    catch (IOException ex) { result.Issues.Add(new ScanIssue(MakeRelative(sourceRoot, entry.FullName), ex.Message)); }
-                }
-            }
-            return result;
         }
 
         private void PreviewItem_PropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -1531,19 +1508,6 @@ namespace PhotoImporter.App
                     item.IsSelected = wasSelected;
             }
         }
-    }
-
-    internal sealed class SourceScanResult
-    {
-        public List<string> Files { get; } = new List<string>();
-        public List<ScanIssue> Issues { get; } = new List<ScanIssue>();
-    }
-
-    internal sealed class ScanIssue
-    {
-        public ScanIssue(string path, string message) { Path = path; Message = message; }
-        public string Path { get; }
-        public string Message { get; }
     }
 
     internal sealed class PreviewBuildResult

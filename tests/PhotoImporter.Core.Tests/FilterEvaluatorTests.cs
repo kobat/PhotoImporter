@@ -619,5 +619,16 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(expectedType, PhotoFileClassifier.Classify(path));
             Assert.Equal(expectedExtension, PhotoFileClassifier.NormalizeExtension(path));
         }
+
+        [Theory]
+        [InlineData("photo.JPG", true)]
+        [InlineData("photo.cr3", true)]
+        [InlineData("clip.MOV", true)]
+        [InlineData("Thumbs.db", false)]
+        [InlineData("notes.txt", false)]
+        public void SupportedRegistryIsSharedByScanningAndClassification(string path, bool expected)
+        {
+            Assert.Equal(expected, PhotoFileClassifier.IsSupported(path));
+        }
     }
 }

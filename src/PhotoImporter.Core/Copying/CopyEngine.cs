@@ -20,29 +20,41 @@ namespace PhotoImporter.Core.Copying
         private readonly ICopyFileOperation _copyFile;
         private readonly MoveFileOperation _moveFile;
         private readonly IFileAttributeOperations _fileAttributes;
+        private readonly IRootAvailability _rootAvailability;
 
         public CopyEngine()
-            : this(new CopyFile2Native(), TryMoveFile, new FileAttributeOperations())
+            : this(new CopyFile2Native(), TryMoveFile, new FileAttributeOperations(), new RootAvailability())
         {
         }
 
         internal CopyEngine(ICopyFileOperation copyFile)
-            : this(copyFile, TryMoveFile, new FileAttributeOperations())
+            : this(copyFile, TryMoveFile, new FileAttributeOperations(), new RootAvailability())
         {
         }
 
         internal CopyEngine(
             ICopyFileOperation copyFile,
             MoveFileOperation moveFile,
-            IFileAttributeOperations fileAttributes)
+            IFileAttributeOperations fileAttributes,
+            IRootAvailability rootAvailability = null)
         {
             _copyFile = copyFile ?? throw new ArgumentNullException(nameof(copyFile));
             _moveFile = moveFile ?? throw new ArgumentNullException(nameof(moveFile));
             _fileAttributes = fileAttributes ?? throw new ArgumentNullException(nameof(fileAttributes));
+            _rootAvailability = rootAvailability ?? new RootAvailability();
         }
 
         public CopyBatchResult Execute(
             IEnumerable<CopyPlanItem> plan,
+            IProgress<CopyProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            return Execute(plan, null, progress, cancellationToken);
+        }
+
+        public CopyBatchResult Execute(
+            IEnumerable<CopyPlanItem> plan,
+            string sourceRoot,
             IProgress<CopyProgress> progress,
             CancellationToken cancellationToken)
         {
@@ -52,6 +64,7 @@ namespace PhotoImporter.Core.Copying
             var totalBytes = items.Sum(item => item.SourceSnapshot.FileSize);
             long completedBytes = 0;
             var cancelled = false;
+            string batchError = null;
 
             Report(progress, 0, items.Count, 0, totalBytes, null);
             for (var index = 0; index < items.Count; index++)
@@ -63,6 +76,8 @@ namespace PhotoImporter.Core.Copying
                 }
 
                 var item = items[index];
+                batchError = GetUnavailableRootError(sourceRoot, item.DestinationRoot);
+                if (batchError != null) break;
                 var currentTransferred = 0L;
                 try
                 {
@@ -83,17 +98,30 @@ namespace PhotoImporter.Core.Copying
                 }
                 catch (CopyRecoveryException ex)
                 {
+                    batchError = GetUnavailableRootError(sourceRoot, item.DestinationRoot);
+                    if (batchError != null) break;
                     results.Add(new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, ex.RecoveryPath));
                     Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
                 }
                 catch (Exception ex)
                 {
+                    batchError = GetUnavailableRootError(sourceRoot, item.DestinationRoot);
+                    if (batchError != null) break;
                     results.Add(new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, null));
                     Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
                 }
             }
 
-            return new CopyBatchResult(results, cancelled);
+            return new CopyBatchResult(results, cancelled, batchError);
+        }
+
+        private string GetUnavailableRootError(string sourceRoot, string destinationRoot)
+        {
+            if (!string.IsNullOrWhiteSpace(sourceRoot) && !_rootAvailability.IsAvailable(sourceRoot))
+                return "コピー元全体を利用できなくなったため、コピーを中止しました: " + sourceRoot;
+            if (!_rootAvailability.IsAvailable(destinationRoot))
+                return "コピー先全体を利用できなくなったため、コピーを中止しました: " + destinationRoot;
+            return null;
         }
 
         private void ExecuteOne(CopyPlanItem item, CancellationToken token, Action<long> progress)
@@ -397,6 +425,21 @@ namespace PhotoImporter.Core.Copying
     {
         FileAttributes GetAttributes(string path);
         void SetAttributes(string path, FileAttributes attributes);
+    }
+
+    internal interface IRootAvailability
+    {
+        bool IsAvailable(string path);
+    }
+
+    internal sealed class RootAvailability : IRootAvailability
+    {
+        public bool IsAvailable(string path)
+        {
+            try { return Directory.Exists(path); }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+        }
     }
 
     internal sealed class FileAttributeOperations : IFileAttributeOperations
