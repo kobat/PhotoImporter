@@ -637,6 +637,13 @@ namespace PhotoImporter.App
                 OnPropertyChanged(nameof(CanCopy));
                 UpdateSummary();
             }
+            else if (ReferenceEquals(sender, SelectedPreviewItem) &&
+                     (e.PropertyName == nameof(PreviewItem.MetadataResult) ||
+                      e.PropertyName == nameof(PreviewItem.MetadataSourcePath)))
+            {
+                OnPropertyChanged(nameof(ExifReadStatus));
+                foreach (var item in ExifTokenDetails) item.SetPreviewItem(SelectedPreviewItem);
+            }
         }
 
         internal void ApplyPreviewFilter(Predicate<PreviewItem> filter)
@@ -770,28 +777,29 @@ namespace PhotoImporter.App
                 SetMessage("フィルターに必要なExif情報を読み取っています。現在の一覧は完了まで維持されます...", Brushes.DimGray);
                 var progress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 var token = scanCancellation.Token;
-                var preview = await Task.Run(() => BuildPreview(
+                var loadPlan = LazyExifPreviewLoadPlan.Capture(
                     sourceRoot,
                     destinationRoot,
-                    parseResult.Template,
-                    OverwriteExisting,
-                    AnalyzeJpegOnlyForRawJpegPair ? RawJpegAnalysisMode.JpegOnlyForPair : RawJpegAnalysisMode.AnalyzeBoth,
+                    Items,
+                    AnalyzeJpegOnlyForRawJpegPair ? RawJpegAnalysisMode.JpegOnlyForPair : RawJpegAnalysisMode.AnalyzeBoth);
+                var loadResult = await Task.Run(() => loadPlan.Load(
                     UseExifCache,
-                    true,
                     ExifCacheRoot,
                     progress,
                     token), token);
 
-                foreach (var item in preview.Items) prepared.Matches(item.CreateFilterCandidate());
-                var selection = PreviewSelectionState.Capture(Items);
-                ReplacePreviewItems(preview.Items, selection);
+                var commit = loadResult.PrepareCommit(Items, prepared);
+                commit.Apply();
+                _exifCacheHits = loadResult.CacheHits;
                 _appliedFilter = conditionCount == 0 ? null : prepared;
                 AppliedFilterCount = conditionCount;
-                ApplyPreviewFilter(item => _appliedFilter.Matches(item.CreateFilterCandidate()));
-                SetMessage(preview.Warnings.Count == 0
+                ApplyPreviewFilter(_appliedFilter == null
+                    ? (Predicate<PreviewItem>)null
+                    : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
+                SetMessage(loadResult.Warnings.Count == 0
                     ? string.Format("Exif情報を読み込み、一覧フィルターを適用しました（{0} 条件）。", conditionCount)
-                    : string.Join(" ", preview.Warnings),
-                    preview.Warnings.Count == 0 ? Brushes.DimGray : Brushes.DarkGoldenrod);
+                    : string.Join(" ", loadResult.Warnings),
+                    loadResult.Warnings.Count == 0 ? Brushes.DimGray : Brushes.DarkGoldenrod);
                 return true;
             }
             catch (OperationCanceledException) when (scanCancellation != null && scanCancellation.IsCancellationRequested)
@@ -1364,9 +1372,9 @@ namespace PhotoImporter.App
         public DestinationStatus DestinationStatus { get; }
         public CopyPlanItem CopyPlan { get; }
         public IReadOnlyList<TemplateWarningCode> Warnings { get; }
-        public FileTemplateContext TemplateContext { get; }
-        public PhotoMetadataReadResult MetadataResult { get; }
-        public string MetadataSourcePath { get; }
+        public FileTemplateContext TemplateContext { get; private set; }
+        public PhotoMetadataReadResult MetadataResult { get; private set; }
+        public string MetadataSourcePath { get; private set; }
         public int? SequenceNumber { get; }
         public bool CanCopy => CopyPlan != null && !IsScanError && _copyError == null;
         public bool IsScanError { get; private set; }
@@ -1421,6 +1429,11 @@ namespace PhotoImporter.App
 
         internal FilterCandidate CreateFilterCandidate()
         {
+            return CreateFilterCandidate(MetadataResult);
+        }
+
+        internal FilterCandidate CreateFilterCandidate(PhotoMetadataReadResult metadataResult)
+        {
             var context = TemplateContext;
             return new FilterCandidate(
                 context == null ? null : context.OriginalName,
@@ -1430,8 +1443,34 @@ namespace PhotoImporter.App
                 context == null ? (bool?)null : context.IsReadOnly,
                 SequenceNumber,
                 GetFilterCopyStatus(),
-                MetadataResult ?? (IsScanError ? ScanErrorMetadataResult : null),
+                metadataResult ?? (IsScanError ? ScanErrorMetadataResult : null),
                 !IsScanError);
+        }
+
+        internal void AttachMetadata(
+            PhotoMetadataReadResult metadataResult,
+            string metadataSourcePath,
+            DateTime metadataSourceModifiedDate,
+            DateTime metadataSourceModifiedDateUtc)
+        {
+            if (metadataResult == null) throw new ArgumentNullException(nameof(metadataResult));
+            if (TemplateContext == null)
+                throw new InvalidOperationException("A template context is required to attach metadata.");
+            TemplateContext = new FileTemplateContext(
+                TemplateContext.OriginalName,
+                TemplateContext.ModifiedDate,
+                TemplateContext.FileSize,
+                TemplateContext.SourceRelativeDirectory,
+                metadataResult.Metadata,
+                TemplateContext.ModifiedDateUtc,
+                metadataSourceModifiedDate,
+                metadataSourceModifiedDateUtc,
+                TemplateContext.IsReadOnly);
+            MetadataResult = metadataResult;
+            MetadataSourcePath = metadataSourcePath;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TemplateContext)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MetadataResult)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MetadataSourcePath)));
         }
 
         private FilterCopyStatus GetFilterCopyStatus()
