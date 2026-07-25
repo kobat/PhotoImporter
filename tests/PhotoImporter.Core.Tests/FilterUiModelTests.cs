@@ -171,6 +171,39 @@ namespace PhotoImporter.Core.Tests
             Assert.Contains("{Sequence}", error);
         }
 
+        [Theory]
+        [InlineData(FilterField.Extension)]
+        [InlineData(FilterField.Protected)]
+        [InlineData(FilterField.HasGps)]
+        public void FieldsWithErrorStateUnknown_EnableUnknownOption(FilterField field)
+        {
+            var editor = CreateEditor(field);
+
+            Assert.True(editor.CanIncludeUnknown);
+        }
+
+        [Fact]
+        public void HasGpsEditor_CanBuildConditionsThatIncludeOrExcludeUnknown()
+        {
+            var editor = CreateEditor(FilterField.HasGps);
+            editor.Choices.Single(item => Equals(item.Value, true)).IsSelected = true;
+            var unsupported = new FilterCandidate(
+                "photo.bin",
+                new DateTime(2026, 7, 23),
+                1,
+                string.Empty,
+                false,
+                null,
+                FilterCopyStatus.NotImported,
+                PhotoMetadataReadResult.Unsupported());
+
+            Assert.False(Prepare(editor).Matches(unsupported));
+
+            editor.IncludeUnknown = true;
+
+            Assert.True(Prepare(editor).Matches(unsupported));
+        }
+
         private static FilterConditionEditor CreateEditor(FilterField field)
         {
             var fields = FilterFieldOption.CreateAll();

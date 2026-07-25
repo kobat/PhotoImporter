@@ -272,6 +272,34 @@ namespace PhotoImporter.Core.Tests
             Assert.True(prepared.Matches(item.CreateFilterCandidate()));
         }
 
+        [Theory]
+        [InlineData(FilterField.Extension)]
+        [InlineData(FilterField.Protected)]
+        public void ScanError_FileSystemConditionUsesIncludeUnknown(FilterField field)
+        {
+            var item = PreviewItem.ForScanError("unreadable.jpg", "access denied");
+            FilterCondition withoutUnknown;
+            FilterCondition withUnknown;
+            if (field == FilterField.Extension)
+            {
+                withoutUnknown = new StringFilterCondition(
+                    field, ".jpg", StringFilterMatchMode.Exact);
+                withUnknown = new StringFilterCondition(
+                    field, ".jpg", StringFilterMatchMode.Exact, includeUnknown: true);
+            }
+            else
+            {
+                withoutUnknown = new ChoiceFilterCondition<bool>(field, new[] { true });
+                withUnknown = new ChoiceFilterCondition<bool>(
+                    field, new[] { true }, includeUnknown: true);
+            }
+
+            Assert.False(new FilterSet(new[] { withoutUnknown }).Prepare().Filter
+                .Matches(item.CreateFilterCandidate()));
+            Assert.True(new FilterSet(new[] { withUnknown }).Prepare().Filter
+                .Matches(item.CreateFilterCandidate()));
+        }
+
         private static PreviewItemCollectionState CreateCollectionState(params PreviewItem[] items) =>
             new PreviewItemCollectionState(new ObservableCollection<PreviewItem>(items));
 

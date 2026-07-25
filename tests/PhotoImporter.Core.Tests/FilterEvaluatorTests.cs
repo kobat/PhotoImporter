@@ -296,6 +296,87 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Theory]
+        [InlineData(true, true, 2, true)]
+        [InlineData(true, true, 1, false)]
+        [InlineData(true, true, null, true)]
+        [InlineData(true, false, 2, true)]
+        [InlineData(true, false, 1, false)]
+        [InlineData(true, false, null, false)]
+        [InlineData(false, true, 2, false)]
+        [InlineData(false, true, 1, true)]
+        [InlineData(false, true, null, false)]
+        [InlineData(false, false, 2, false)]
+        [InlineData(false, false, 1, true)]
+        [InlineData(false, false, null, true)]
+        public void SequenceSpecialValueParticipatesInKnownMatchBeforeTargetModeIsApplied(
+            bool includeMatches,
+            bool includeNoSequence,
+            int? sequenceNumber,
+            bool expected)
+        {
+            var filter = Prepare(new NumberFilterCondition(
+                FilterField.Sequence,
+                2,
+                3,
+                includeMatches: includeMatches,
+                includeNoSequence: includeNoSequence));
+
+            Assert.Equal(expected, filter.Matches(CreateCandidate(sequenceNumber: sequenceNumber)));
+        }
+
+        [Theory]
+        [InlineData(true, true, 4, true)]
+        [InlineData(true, true, 3, false)]
+        [InlineData(true, true, -1, true)]
+        [InlineData(true, false, 4, true)]
+        [InlineData(true, false, 3, false)]
+        [InlineData(true, false, -1, false)]
+        [InlineData(false, true, 4, false)]
+        [InlineData(false, true, 3, true)]
+        [InlineData(false, true, -1, false)]
+        [InlineData(false, false, 4, false)]
+        [InlineData(false, false, 3, true)]
+        [InlineData(false, false, -1, true)]
+        public void RatingSpecialValueParticipatesInKnownMatchBeforeTargetModeIsApplied(
+            bool includeMatches,
+            bool includeRejected,
+            int rating,
+            bool expected)
+        {
+            var filter = Prepare(new NumberFilterCondition(
+                FilterField.Rating,
+                4,
+                5,
+                includeMatches: includeMatches,
+                includeRejectedRating: includeRejected));
+
+            Assert.Equal(expected, filter.Matches(
+                CreateCandidate(metadataResult: Metadata(rating: rating))));
+        }
+
+        [Theory]
+        [InlineData(true, true, true)]
+        [InlineData(true, false, false)]
+        [InlineData(false, true, true)]
+        [InlineData(false, false, false)]
+        public void UnknownRatingIsIndependentOfTargetModeAndRejectedSelection(
+            bool includeMatches,
+            bool includeUnknown,
+            bool expected)
+        {
+            var filter = Prepare(new NumberFilterCondition(
+                FilterField.Rating,
+                1,
+                5,
+                includeMatches: includeMatches,
+                includeUnknown: includeUnknown,
+                includeRejectedRating: true));
+
+            Assert.Equal(expected, filter.Matches(
+                CreateCandidate(metadataResult: PhotoMetadataReadResult.Unsupported())));
+        }
+
+        [Theory]
         [InlineData("1 B", 1L)]
         [InlineData("1.5 KiB", 1536L)]
         [InlineData("2mib", 2097152L)]
@@ -333,11 +414,76 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
-        public void NoGpsIsKnownAfterExifWasRead()
+        public void HasGpsFollowsExifReadStatusSemantics()
         {
-            var filter = Prepare(new ChoiceFilterCondition<bool>(FilterField.HasGps, new[] { false }));
+            var gps = Prepare(new ChoiceFilterCondition<bool>(FilterField.HasGps, new[] { true }));
+            var noGps = Prepare(new ChoiceFilterCondition<bool>(FilterField.HasGps, new[] { false }));
+            var unknown = Prepare(new ChoiceFilterCondition<bool>(
+                FilterField.HasGps, new[] { true }, includeUnknown: true));
 
-            Assert.True(filter.Matches(CreateCandidate(metadataResult: PhotoMetadataReadResult.NoMetadata())));
+            Assert.True(gps.Matches(CreateCandidate(
+                metadataResult: Metadata(gpsLatitude: 35m, gpsLongitude: 139m))));
+            Assert.True(noGps.Matches(CreateCandidate(
+                metadataResult: Metadata(cameraMake: "Sony"))));
+            Assert.True(noGps.Matches(CreateCandidate(
+                metadataResult: PhotoMetadataReadResult.NoMetadata())));
+
+            Assert.False(noGps.Matches(CreateCandidate(
+                metadataResult: PhotoMetadataReadResult.Unsupported())));
+            Assert.True(unknown.Matches(CreateCandidate(
+                metadataResult: PhotoMetadataReadResult.Unsupported())));
+            Assert.False(noGps.Matches(CreateCandidate(
+                metadataResult: PhotoMetadataReadResult.ReadError(new InvalidOperationException()))));
+            Assert.True(unknown.Matches(CreateCandidate(
+                metadataResult: PhotoMetadataReadResult.ReadError(new InvalidOperationException()))));
+            Assert.False(gps.Matches(CreateCandidate(
+                copyStatus: FilterCopyStatus.ScanError,
+                metadataResult: Metadata(gpsLatitude: 35m, gpsLongitude: 139m))));
+            Assert.True(unknown.Matches(CreateCandidate(
+                copyStatus: FilterCopyStatus.ScanError,
+                metadataResult: Metadata(gpsLatitude: 35m, gpsLongitude: 139m))));
+        }
+
+        [Theory]
+        [InlineData(FilterField.Extension)]
+        [InlineData(FilterField.Protected)]
+        public void ScanErrorFileSystemValuesAreUnknownAndCanBeIncluded(FilterField field)
+        {
+            FilterCondition excludedUnknown;
+            FilterCondition includedUnknown;
+            if (field == FilterField.Extension)
+            {
+                excludedUnknown = new StringFilterCondition(
+                    field, ".jpg", StringFilterMatchMode.Exact);
+                includedUnknown = new StringFilterCondition(
+                    field, ".jpg", StringFilterMatchMode.Exact, includeUnknown: true);
+            }
+            else
+            {
+                excludedUnknown = new ChoiceFilterCondition<bool>(field, new[] { true });
+                includedUnknown = new ChoiceFilterCondition<bool>(
+                    field, new[] { true }, includeUnknown: true);
+            }
+
+            var scanError = CreateCandidate(
+                originalName: "unreadable.jpg",
+                isProtected: true,
+                copyStatus: FilterCopyStatus.ScanError);
+
+            Assert.False(Prepare(excludedUnknown).Matches(scanError));
+            Assert.True(Prepare(includedUnknown).Matches(scanError));
+        }
+
+        [Fact]
+        public void NormalExtensionAndProtectedValuesRemainKnown()
+        {
+            var filter = Prepare(
+                new StringFilterCondition(
+                    FilterField.Extension, ".jpg", StringFilterMatchMode.Exact),
+                new ChoiceFilterCondition<bool>(FilterField.Protected, new[] { true }));
+
+            Assert.True(filter.Matches(CreateCandidate("photo.JPG", isProtected: true)));
+            Assert.False(filter.Matches(CreateCandidate("photo.JPG", isProtected: false)));
         }
 
         [Fact]
@@ -362,9 +508,9 @@ namespace PhotoImporter.Core.Tests
             Assert.True(FilterFieldDefinition.Get(FilterField.CameraModel).RequiresExif);
             Assert.False(FilterFieldDefinition.Get(FilterField.FileSize).RequiresExif);
             Assert.False(FilterFieldDefinition.Get(FilterField.ExifReadStatus).CanBeUnknown);
-            Assert.False(FilterFieldDefinition.Get(FilterField.Extension).CanBeUnknown);
-            Assert.False(FilterFieldDefinition.Get(FilterField.Protected).CanBeUnknown);
-            Assert.False(FilterFieldDefinition.Get(FilterField.HasGps).CanBeUnknown);
+            Assert.True(FilterFieldDefinition.Get(FilterField.Extension).CanBeUnknown);
+            Assert.True(FilterFieldDefinition.Get(FilterField.Protected).CanBeUnknown);
+            Assert.True(FilterFieldDefinition.Get(FilterField.HasGps).CanBeUnknown);
         }
 
         [Fact]
@@ -387,8 +533,8 @@ namespace PhotoImporter.Core.Tests
         {
             var result = new FilterSet(new FilterCondition[]
             {
-                new ChoiceFilterCondition<bool>(
-                    FilterField.HasGps, new[] { true }, includeUnknown: true)
+                new ChoiceFilterCondition<FilterCopyStatus>(
+                    FilterField.CopyStatus, new[] { FilterCopyStatus.NotImported }, includeUnknown: true)
             }).Prepare();
 
             Assert.False(result.IsValid);
@@ -409,7 +555,8 @@ namespace PhotoImporter.Core.Tests
             string relativeDirectory = "DCIM",
             bool? isProtected = false,
             int? sequenceNumber = null,
-            PhotoMetadataReadResult metadataResult = null)
+            PhotoMetadataReadResult metadataResult = null,
+            FilterCopyStatus copyStatus = FilterCopyStatus.NotImported)
         {
             return new FilterCandidate(
                 originalName,
@@ -418,7 +565,7 @@ namespace PhotoImporter.Core.Tests
                 relativeDirectory,
                 isProtected,
                 sequenceNumber,
-                FilterCopyStatus.NotImported,
+                copyStatus,
                 metadataResult);
         }
 
@@ -431,7 +578,9 @@ namespace PhotoImporter.Core.Tests
             int? decodedHeight = null,
             int? orientation = null,
             ExifRational? exposure = null,
-            int? rating = null)
+            int? rating = null,
+            decimal? gpsLatitude = null,
+            decimal? gpsLongitude = null)
         {
             var metadata = new PhotoMetadata(
                 takenDate,
@@ -444,7 +593,9 @@ namespace PhotoImporter.Core.Tests
                 decodedHeight: decodedHeight,
                 orientation: orientation,
                 exposureTime: exposure,
-                rating: rating);
+                rating: rating,
+                gpsLatitude: gpsLatitude,
+                gpsLongitude: gpsLongitude);
             return metadata.HasValues
                 ? PhotoMetadataReadResult.Success(metadata)
                 : PhotoMetadataReadResult.NoMetadata();

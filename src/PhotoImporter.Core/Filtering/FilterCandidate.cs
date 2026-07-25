@@ -64,7 +64,7 @@ namespace PhotoImporter.Core.Filtering
                         ? UnknownFileValue()
                         : FilterValue.Known(PhotoFileClassifier.Classify(OriginalName));
                 case FilterField.Extension:
-                    return OriginalName == null
+                    return CopyStatus == FilterCopyStatus.ScanError || OriginalName == null
                         ? UnknownFileValue()
                         : FilterValue.Known(PhotoFileClassifier.NormalizeExtension(OriginalName));
                 case FilterField.CopyStatus:
@@ -84,7 +84,9 @@ namespace PhotoImporter.Core.Filtering
                 case FilterField.FileSize:
                     return FileSize.HasValue ? FilterValue.Known((decimal)FileSize.Value) : UnknownFileValue();
                 case FilterField.Protected:
-                    return IsProtected.HasValue ? FilterValue.Known(IsProtected.Value) : UnknownFileValue();
+                    return CopyStatus != FilterCopyStatus.ScanError && IsProtected.HasValue
+                        ? FilterValue.Known(IsProtected.Value)
+                        : UnknownFileValue();
                 case FilterField.Sequence:
                     return !SequenceIsKnown
                         ? UnknownFileValue()
@@ -125,7 +127,17 @@ namespace PhotoImporter.Core.Filtering
                 case FilterField.FocalLength: return NullableNumber(metadata.FocalLength);
                 case FilterField.FocalLength35mm: return NullableNumber(metadata.FocalLength35mm);
                 case FilterField.Rating: return NullableNumber(metadata.Rating);
-                case FilterField.HasGps: return FilterValue.Known(metadata.HasGps);
+                case FilterField.HasGps:
+                    if (CopyStatus == FilterCopyStatus.ScanError) return UnknownFileValue();
+                    switch (MetadataResult.Status)
+                    {
+                        case PhotoMetadataReadStatus.Success:
+                            return FilterValue.Known(metadata.HasGps);
+                        case PhotoMetadataReadStatus.NoMetadata:
+                            return FilterValue.Known(false);
+                        default:
+                            return UnknownExifValue();
+                    }
                 case FilterField.GpsLatitude: return NullableNumber(metadata.GpsLatitude);
                 case FilterField.GpsLongitude: return NullableNumber(metadata.GpsLongitude);
                 case FilterField.GpsAltitude: return NullableNumber(metadata.GpsAltitude);

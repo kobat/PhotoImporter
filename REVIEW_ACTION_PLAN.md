@@ -313,7 +313,7 @@ P1-A と P1-B は完了済みである。未完了タスクでは、P1-C、P2-C�
 - コミット: 未実施（この作業ツリーに実装済み）。
 - 残存リスク: WPF 画面上での実クリックによるチェック状態・無効表示の確認は未実施。モデルと XAML バインディング、および条件評価結果は自動テストと Release ビルドで確認済み。
 
-### [ ] P2-F: Unknown・特殊値・エラー行の仕様確定
+### [x] P2-F: Unknown・特殊値・エラー行の仕様確定
 
 対象: F-5、FD-1、FD-2、FT-3
 
@@ -359,10 +359,10 @@ P1-A と P1-B は完了済みである。未完了タスクでは、P1-C、P2-C�
 
 #### 完了記録
 
-- 実施内容:
-- 検証結果:
-- コミット:
-- 残存リスク:
+- 実施内容: `FILTER_SPEC.md` に Exif 読取状態別の `{HasGps}` 判定表と、`{Sequence}` の「連番なし」・`{Rating}` の `Rejected` に対する対象／除外表を追加した。`{Extension}`、`{Protected}`、`{HasGps}` を Unknown 指定可能なフィールドへ変更し、スキャンエラーの拡張子・読み取り専用状態を Unknown として評価するよう統一した。`{HasGps}` は正常読込の GPS 有無を `GPS` / `NoGPS`、`NoMetadata` を `NoGPS`、`Unsupported`・`ReadError`・スキャンエラーを Unknown として返すよう修正した。特殊値を含む既知値マッチ全体の反転と Unknown の独立判定は既存実装が採用方針どおりだったため変更せず、全組合せテストで仕様を固定した。UI モデルで3フィールドの「Unknownを含める」が有効になり、`{HasGps}` の Unknown を含める／除外する条件を構築できることもテストへ追加した。
+- 検証結果: `dotnet test PhotoImporter.sln -c Release --no-restore` は 274 件成功。`dotnet build PhotoImporter.sln -c Release --no-restore` は警告 0・エラー 0。`git diff --check` も成功。
+- コミット: 未実施（この作業ツリーに実装済み）。
+- 残存リスク: WPF 画面上での実クリックによる「Unknownを含める」の有効表示確認は未実施。条件モデル、候補値、プレビューのスキャンエラー行、および評価結果は自動テストと Release ビルドで確認済み。
 
 ### [ ] P2-C: 対象ファイル列挙とドライブ利用不能時の制御
 

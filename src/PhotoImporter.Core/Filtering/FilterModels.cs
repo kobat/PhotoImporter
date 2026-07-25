@@ -91,7 +91,7 @@ namespace PhotoImporter.Core.Filtering
         private static IEnumerable<FilterFieldDefinition> CreateDefinitions()
         {
             yield return Choice(FilterField.FileType, typeof(Metadata.PhotoFileType), false, true);
-            yield return String(FilterField.Extension, false, false);
+            yield return String(FilterField.Extension, false, true);
             yield return Choice(FilterField.CopyStatus, typeof(FilterCopyStatus), false, false);
             yield return Choice(FilterField.ExifReadStatus, typeof(FilterExifReadStatus), true, false);
             yield return String(FilterField.OriginalName, false, true);
@@ -99,7 +99,7 @@ namespace PhotoImporter.Core.Filtering
             yield return String(FilterField.SourceRelativeDirectory, false, true);
             yield return Date(FilterField.ModifiedDate, false, true);
             yield return Number(FilterField.FileSize, false, true);
-            yield return Boolean(FilterField.Protected, false, false);
+            yield return Boolean(FilterField.Protected, false, true);
             yield return Number(FilterField.Sequence, false, true);
             yield return Date(FilterField.TakenDate, true, true);
             yield return Date(FilterField.TakenDateLocal, true, true);
@@ -120,7 +120,7 @@ namespace PhotoImporter.Core.Filtering
             yield return Number(FilterField.FocalLength, true, true);
             yield return Number(FilterField.FocalLength35mm, true, true);
             yield return Number(FilterField.Rating, true, true);
-            yield return Boolean(FilterField.HasGps, true, false);
+            yield return Boolean(FilterField.HasGps, true, true);
             yield return Number(FilterField.GpsLatitude, true, true);
             yield return Number(FilterField.GpsLongitude, true, true);
             yield return Number(FilterField.GpsAltitude, true, true);
