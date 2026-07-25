@@ -204,6 +204,56 @@ namespace PhotoImporter.Core.Tests
             Assert.True(Prepare(editor).Matches(unsupported));
         }
 
+        [Fact]
+        public void StringEditor_SummaryDescribesMatchModeValueAndOptions()
+        {
+            var editor = CreateEditor(FilterField.OriginalName);
+            editor.SelectedStringMatchMode = editor.StringMatchModes.Single(
+                item => item.Value == StringFilterMatchMode.Contains);
+            editor.Pattern = "summer";
+            editor.CaseSensitive = true;
+            editor.IncludeUnknown = true;
+
+            Assert.Contains("元ファイル名", editor.Summary);
+            Assert.Contains("部分一致「summer」", editor.Summary);
+            Assert.Contains("Unknownを含む", editor.Summary);
+            Assert.Contains("大文字・小文字を区別", editor.Summary);
+        }
+
+        [Fact]
+        public void NumberEditor_SummaryDescribesRangeAndSpecialValues()
+        {
+            var editor = CreateEditor(FilterField.Rating);
+            editor.MinimumText = "3";
+            editor.MaximumText = "5";
+            editor.IncludeRejectedRating = true;
+
+            Assert.Contains("3～5 または Rejected", editor.Summary);
+        }
+
+        [Fact]
+        public void DateEditor_SummaryDescribesRangeAndTimeZone()
+        {
+            var editor = CreateEditor(FilterField.TakenDateInTimeZone);
+            editor.StartDate = new DateTime(2026, 7, 1);
+            editor.EndDate = new DateTime(2026, 7, 31);
+            editor.TimeZoneSpecifier = "JST";
+
+            Assert.Contains("2026/7/1～2026/7/31", editor.Summary);
+            Assert.Contains("[JST]", editor.Summary);
+        }
+
+        [Fact]
+        public void StateKey_ChangesWhenChoiceSelectionChanges()
+        {
+            var editor = CreateEditor(FilterField.FileType);
+            var before = editor.StateKey;
+
+            editor.Choices.Single(item => Equals(item.Value, PhotoFileType.Raw)).IsSelected = true;
+
+            Assert.NotEqual(before, editor.StateKey);
+        }
+
         private static FilterConditionEditor CreateEditor(FilterField field)
         {
             var fields = FilterFieldOption.CreateAll();

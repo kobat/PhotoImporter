@@ -217,6 +217,40 @@ namespace PhotoImporter.App
         public bool CanIncludeUnknown => FilterFieldDefinition.Get(SelectedField.Field).CanBeUnknown;
         public bool IsValid { get { FilterCondition condition; string error; return TryBuild(out condition, out error); } }
         public string ValidationMessage { get { FilterCondition condition; string error; return TryBuild(out condition, out error) ? string.Empty : error; } }
+        public string Summary
+        {
+            get
+            {
+                var value = BuildValueSummary();
+                var options = new List<string>();
+                if (IncludeUnknown) options.Add("Unknownを含む");
+                if (CaseSensitive && CanUseCaseSensitivity) options.Add("大文字・小文字を区別");
+                if (SelectedTargetMode != null && !SelectedTargetMode.Value) options.Add("一致項目を除外");
+                return SelectedField.DisplayName + ": " + value +
+                       (options.Count == 0 ? string.Empty : "（" + string.Join("、", options) + "）");
+            }
+        }
+
+        internal string StateKey => string.Join("\u001f", new[]
+        {
+            SelectedField.Field.ToString(),
+            SelectedStringMatchMode?.Value.ToString() ?? string.Empty,
+            SelectedTargetMode?.Value.ToString() ?? string.Empty,
+            Pattern,
+            MinimumText,
+            MaximumText,
+            StartDate?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
+            EndDate?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
+            StartTimeText,
+            EndTimeText,
+            TimeZoneSpecifier,
+            CaseSensitive.ToString(),
+            IncludeUnknown.ToString(),
+            IncludeNoSequence.ToString(),
+            IncludeRejectedRating.ToString(),
+            string.Join(",", Choices.Select(item =>
+                Convert.ToString(item.Value, CultureInfo.InvariantCulture) + "=" + item.IsSelected))
+        });
 
         public bool TryBuild(out FilterCondition condition, out string error)
         {
@@ -330,6 +364,49 @@ namespace PhotoImporter.App
             return true;
         }
 
+        private string BuildValueSummary()
+        {
+            switch (ValueType)
+            {
+                case FilterValueType.String:
+                    return (SelectedStringMatchMode?.DisplayName ?? "文字列") + "「" + Pattern + "」";
+                case FilterValueType.Number:
+                    var numberParts = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(MinimumText) && !string.IsNullOrWhiteSpace(MaximumText))
+                        numberParts.Add(MinimumText.Trim() + "～" + MaximumText.Trim());
+                    else if (!string.IsNullOrWhiteSpace(MinimumText))
+                        numberParts.Add(MinimumText.Trim() + "以上");
+                    else if (!string.IsNullOrWhiteSpace(MaximumText))
+                        numberParts.Add(MaximumText.Trim() + "以下");
+                    if (IncludeNoSequence) numberParts.Add("連番なし");
+                    if (IncludeRejectedRating) numberParts.Add("Rejected");
+                    return numberParts.Count == 0 ? "値未指定" : string.Join(" または ", numberParts);
+                case FilterValueType.DateTime:
+                    var start = FormatDateBoundary(StartDate, StartTimeText);
+                    var end = FormatDateBoundary(EndDate, EndTimeText);
+                    var range = !string.IsNullOrEmpty(start) && !string.IsNullOrEmpty(end)
+                        ? start + "～" + end
+                        : !string.IsNullOrEmpty(start) ? start + "以降"
+                        : !string.IsNullOrEmpty(end) ? end + "以前"
+                        : "日時未指定";
+                    return IsTimeZoneDate && !string.IsNullOrWhiteSpace(TimeZoneSpecifier)
+                        ? range + " [" + TimeZoneSpecifier.Trim() + "]"
+                        : range;
+                default:
+                    var selected = Choices.Where(item => item.IsSelected)
+                        .Select(item => item.DisplayName)
+                        .ToList();
+                    return selected.Count == 0 ? "選択なし" : string.Join(" または ", selected);
+            }
+        }
+
+        private static string FormatDateBoundary(DateTime? date, string timeText)
+        {
+            if (!date.HasValue) return string.Empty;
+            var result = date.Value.ToString("yyyy/M/d", CultureInfo.CurrentCulture);
+            return string.IsNullOrWhiteSpace(timeText) ? result : result + " " + timeText.Trim();
+        }
+
         private void RebuildChoices()
         {
             foreach (var item in Choices) item.PropertyChanged -= Choice_PropertyChanged;
@@ -395,6 +472,8 @@ namespace PhotoImporter.App
         {
             OnPropertyChanged(nameof(IsValid));
             OnPropertyChanged(nameof(ValidationMessage));
+            OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(StateKey));
         }
 
         private bool Set<T>(ref T field, T value, [CallerMemberName] string name = null)

@@ -14,7 +14,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
 namespace PhotoImporter.App
@@ -48,6 +50,16 @@ namespace PhotoImporter.App
         private PreviewItemCollectionState _itemCollectionState;
         private PreparedFilter _appliedFilter;
         private int _appliedFilterCount;
+        private readonly List<string> _appliedFilterConditionSummaries = new List<string>();
+        private string _appliedFilterStateKey = string.Empty;
+        private OverlayPanel _activeOverlay;
+
+        private enum OverlayPanel
+        {
+            None,
+            ExifSettings,
+            Filter
+        }
 
         public MainWindow()
         {
@@ -118,13 +130,23 @@ namespace PhotoImporter.App
         public bool UseExifCache
         {
             get => _useExifCache;
-            set { if (Set(ref _useExifCache, value)) SettingsChanged(); }
+            set
+            {
+                if (!Set(ref _useExifCache, value)) return;
+                NotifyExifSettingsSummaryChanged();
+                SettingsChanged();
+            }
         }
 
         public bool ReadExifInformation
         {
             get => _readExifInformation;
-            set { if (Set(ref _readExifInformation, value)) SettingsChanged(); }
+            set
+            {
+                if (!Set(ref _readExifInformation, value)) return;
+                NotifyExifSettingsSummaryChanged();
+                SettingsChanged();
+            }
         }
 
         public PreviewItem SelectedPreviewItem
@@ -168,6 +190,12 @@ namespace PhotoImporter.App
         public string ExifCacheRoot => string.IsNullOrWhiteSpace(_customExifCacheRoot)
             ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "ExifCache"))
             : Path.GetFullPath(_customExifCacheRoot);
+        public string ExifSettingsSummary => string.Format(
+            "Exif: {0} / キャッシュ {1} / 保存先: {2}",
+            ReadExifInformation ? "常に読込" : "必要時のみ読込",
+            UseExifCache ? "ON" : "OFF",
+            string.IsNullOrWhiteSpace(_customExifCacheRoot) ? "既定" : ExifCacheRoot);
+        public string ExifSettingsToolTip => ExifSettingsSummary + Environment.NewLine + ExifCacheRoot;
 
         public string Message { get => _message; private set => Set(ref _message, value); }
         public string Summary { get => _summary; private set => Set(ref _summary, value); }
@@ -195,9 +223,54 @@ namespace PhotoImporter.App
                 _appliedFilterCount = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(FilterSummary));
+                OnPropertyChanged(nameof(FilterSummaryToolTip));
             }
         }
-        public string FilterSummary => string.Format("適用済み条件 {0} 件", AppliedFilterCount);
+        public string FilterSummary
+        {
+            get
+            {
+                if (_appliedFilterConditionSummaries.Count == 0) return "フィルター: 条件なし";
+                var shown = string.Join(" / ", _appliedFilterConditionSummaries.Take(2));
+                var remainder = _appliedFilterConditionSummaries.Count - 2;
+                return "フィルター: " + shown +
+                       (remainder > 0 ? string.Format(" / ほか{0}件", remainder) : string.Empty);
+            }
+        }
+        public string FilterSummaryToolTip
+        {
+            get
+            {
+                var applied = _appliedFilterConditionSummaries.Count == 0
+                    ? "適用中の条件はありません。"
+                    : "適用中:" + Environment.NewLine +
+                      string.Join(Environment.NewLine, _appliedFilterConditionSummaries.Select((item, index) =>
+                          string.Format("{0}. {1}", index + 1, item)));
+                if (!HasUnappliedFilterChanges) return applied;
+                var draft = FilterConditions.Count == 0
+                    ? "条件なし"
+                    : string.Join(Environment.NewLine, FilterConditions.Select((item, index) =>
+                        string.Format("{0}. {1}", index + 1, item.Summary)));
+                return applied + Environment.NewLine + Environment.NewLine +
+                       "未適用の編集:" + Environment.NewLine + draft;
+            }
+        }
+        public bool HasUnappliedFilterChanges => !string.Equals(
+            _appliedFilterStateKey,
+            BuildCurrentFilterStateKey(),
+            StringComparison.Ordinal);
+        public string FilterEditStatus => HasUnappliedFilterChanges
+            ? string.Format("未適用の変更あり（編集中 {0} 件）", FilterConditions.Count)
+            : string.Format("適用済み {0} 件", AppliedFilterCount);
+        public Visibility FilterEditStatusVisibility => HasUnappliedFilterChanges
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        public Visibility ExifSettingsOverlayVisibility => _activeOverlay == OverlayPanel.ExifSettings
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        public Visibility FilterOverlayVisibility => _activeOverlay == OverlayPanel.Filter
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         public string CopyButtonText => string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
         public string ViewSelectionSummary
         {
@@ -247,6 +320,22 @@ namespace PhotoImporter.App
 
         private void ResetExifCacheRoot_Click(object sender, RoutedEventArgs e) =>
             ChangeExifCacheRoot(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "ExifCache")), true);
+
+        private void ShowExifSettingsOverlay_Click(object sender, RoutedEventArgs e) =>
+            SetActiveOverlay(OverlayPanel.ExifSettings);
+
+        private void ShowFilterOverlay_Click(object sender, RoutedEventArgs e) =>
+            SetActiveOverlay(OverlayPanel.Filter);
+
+        private void CloseOverlay_Click(object sender, RoutedEventArgs e) =>
+            CloseOverlay(true);
+
+        private void MainWindow_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Escape || _activeOverlay == OverlayPanel.None) return;
+            CloseOverlay(true);
+            e.Handled = true;
+        }
 
         private async void Scan_Click(object sender, RoutedEventArgs e)
         {
@@ -748,7 +837,7 @@ namespace PhotoImporter.App
             var editor = new FilterConditionEditor(FilterFieldOptions);
             editor.PropertyChanged += FilterCondition_PropertyChanged;
             FilterConditions.Add(editor);
-            OnPropertyChanged(nameof(CanApplyFilter));
+            NotifyFilterEditorStateChanged();
         }
 
         private void RemoveFilterCondition_Click(object sender, RoutedEventArgs e)
@@ -757,7 +846,7 @@ namespace PhotoImporter.App
             if (editor == null) return;
             editor.PropertyChanged -= FilterCondition_PropertyChanged;
             FilterConditions.Remove(editor);
-            OnPropertyChanged(nameof(CanApplyFilter));
+            NotifyFilterEditorStateChanged();
         }
 
         private async void ApplyFilter_Click(object sender, RoutedEventArgs e)
@@ -794,17 +883,15 @@ namespace PhotoImporter.App
             foreach (var editor in FilterConditions) editor.PropertyChanged -= FilterCondition_PropertyChanged;
             FilterConditions.Clear();
             _appliedFilter = null;
-            AppliedFilterCount = 0;
+            CommitAppliedFilterEditorState(0);
             ApplyPreviewFilter(null);
             SetMessage("一覧フィルターをクリアしました。", Brushes.DimGray);
-            OnPropertyChanged(nameof(CanApplyFilter));
         }
 
         private void FilterCondition_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == nameof(FilterConditionEditor.IsValid) ||
-                e.PropertyName == nameof(FilterConditionEditor.ValidationMessage))
-                OnPropertyChanged(nameof(CanApplyFilter));
+            if (e.PropertyName == nameof(FilterConditionEditor.IsValid))
+                NotifyFilterEditorStateChanged();
         }
 
         private bool TryCommitFilter(PreparedFilter prepared, int conditionCount)
@@ -813,7 +900,7 @@ namespace PhotoImporter.App
             {
                 foreach (var item in Items) prepared.Matches(item.CreateFilterCandidate());
                 _appliedFilter = conditionCount == 0 ? null : prepared;
-                AppliedFilterCount = conditionCount;
+                CommitAppliedFilterEditorState(conditionCount);
                 ApplyPreviewFilter(_appliedFilter == null
                     ? (Predicate<PreviewItem>)null
                     : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
@@ -871,7 +958,7 @@ namespace PhotoImporter.App
                 commit.Apply();
                 _exifCacheHits = loadResult.CacheHits;
                 _appliedFilter = conditionCount == 0 ? null : prepared;
-                AppliedFilterCount = conditionCount;
+                CommitAppliedFilterEditorState(conditionCount);
                 ApplyPreviewFilter(_appliedFilter == null
                     ? (Predicate<PreviewItem>)null
                     : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
@@ -952,6 +1039,63 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(ViewSelectionSummary));
         }
 
+        private void SetActiveOverlay(OverlayPanel overlay)
+        {
+            if (_activeOverlay == overlay) return;
+            _activeOverlay = overlay;
+            OnPropertyChanged(nameof(ExifSettingsOverlayVisibility));
+            OnPropertyChanged(nameof(FilterOverlayVisibility));
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_activeOverlay == OverlayPanel.ExifSettings) ExifOverlayCloseButton.Focus();
+                else if (_activeOverlay == OverlayPanel.Filter) FilterOverlayCloseButton.Focus();
+            }), DispatcherPriority.Input);
+        }
+
+        private void CloseOverlay(bool restoreFocus)
+        {
+            var closing = _activeOverlay;
+            if (closing == OverlayPanel.None) return;
+            _activeOverlay = OverlayPanel.None;
+            OnPropertyChanged(nameof(ExifSettingsOverlayVisibility));
+            OnPropertyChanged(nameof(FilterOverlayVisibility));
+            if (!restoreFocus) return;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (closing == OverlayPanel.ExifSettings) ExifSettingsButton.Focus();
+                else FilterSettingsButton.Focus();
+            }), DispatcherPriority.Input);
+        }
+
+        private string BuildCurrentFilterStateKey() =>
+            string.Join("\u001e", FilterConditions.Select(item => item.StateKey));
+
+        private void CommitAppliedFilterEditorState(int conditionCount)
+        {
+            _appliedFilterConditionSummaries.Clear();
+            if (conditionCount > 0)
+                _appliedFilterConditionSummaries.AddRange(FilterConditions.Select(item => item.Summary));
+            _appliedFilterStateKey = BuildCurrentFilterStateKey();
+            AppliedFilterCount = conditionCount;
+            NotifyFilterEditorStateChanged();
+        }
+
+        private void NotifyFilterEditorStateChanged()
+        {
+            OnPropertyChanged(nameof(CanApplyFilter));
+            OnPropertyChanged(nameof(FilterSummary));
+            OnPropertyChanged(nameof(FilterSummaryToolTip));
+            OnPropertyChanged(nameof(HasUnappliedFilterChanges));
+            OnPropertyChanged(nameof(FilterEditStatus));
+            OnPropertyChanged(nameof(FilterEditStatusVisibility));
+        }
+
+        private void NotifyExifSettingsSummaryChanged()
+        {
+            OnPropertyChanged(nameof(ExifSettingsSummary));
+            OnPropertyChanged(nameof(ExifSettingsToolTip));
+        }
+
         private void SettingsChanged()
         {
             _previewIsCurrent = false;
@@ -972,6 +1116,7 @@ namespace PhotoImporter.App
                 {
                     _customExifCacheRoot = null;
                     OnPropertyChanged(nameof(ExifCacheRoot));
+                    NotifyExifSettingsSummaryChanged();
                     SettingsChanged();
                     SetMessage("Exif キャッシュの保存先を既定値へ戻しました。", Brushes.DimGray);
                 }
@@ -1007,6 +1152,7 @@ namespace PhotoImporter.App
                 path => string.Equals(path, normalizedNewRoot, StringComparison.OrdinalIgnoreCase));
             _customExifCacheRoot = useDefault ? null : normalizedNewRoot;
             OnPropertyChanged(nameof(ExifCacheRoot));
+            NotifyExifSettingsSummaryChanged();
             SettingsChanged();
             SetMessage("Exif キャッシュの保存先を変更しました。", Brushes.DimGray);
         }
