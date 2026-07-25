@@ -262,7 +262,9 @@
                                                              Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                              AutomationProperties.Name="比較する文字列" />
                                                     <CheckBox Grid.Column="2" Content="大文字・小文字を区別"
-                                                              IsChecked="{Binding CaseSensitive}" VerticalAlignment="Center" />
+                                                              IsChecked="{Binding CaseSensitive}"
+                                                              IsEnabled="{Binding CanUseCaseSensitivity}"
+                                                              VerticalAlignment="Center" />
                                                 </Grid>
 
                                                 <Grid Margin="0,7,0,0">

@@ -272,7 +272,7 @@ P1-A と P1-B は完了済みである。未完了タスクでは、P1-C、P2-C�
 - コミット: 未実施（この作業ツリーに実装済み）
 - 残存リスク: 無効チェックボックスのデータバインドと表示・編集スタイルはXAMLコンパイルで確認したが、実画面でのマウス・キーボード操作と高コントラスト表示は手動確認していない。
 
-### [ ] P2-E: 条件編集 UI の状態整合
+### [x] P2-E: 条件編集 UI の状態整合
 
 対象: F-2、F-3、F-4、FT-1
 
@@ -308,10 +308,10 @@ P1-A と P1-B は完了済みである。未完了タスクでは、P1-C、P2-C�
 
 #### 完了記録
 
-- 実施内容:
-- 検証結果:
-- コミット:
-- 残存リスク:
+- 実施内容: `SelectedField` 切替時に `IncludeUnknown`、`IncludeNoSequence`、`IncludeRejectedRating` をバッキングフィールド上で一括して `false` へ戻し、変更された各プロパティの通知後に検証通知を1回へまとめるよう修正した。`{Extension}` へ切り替えた場合は `CaseSensitive` も解除して通知し、WPF の大小文字区別チェックボックスを無効化した。さらに `CaseSensitive` セッターと `TryBuild` の両方で `{Extension}` の大小文字区別を拒否し、`OptionNotSupported` を `{Sequence}` / `{Rating}` の専用オプションが原因と分かる行内メッセージへ変換した。項目切替、通知回数、Sequence / Rating から Iso への切替、拡張子の大小文字非区別、通常文字列項目の大小文字区別、専用オプションの診断を自動テストへ追加した。
+- 検証結果: `dotnet test PhotoImporter.sln -c Release --no-restore` は 237 件成功。`dotnet build PhotoImporter.sln -c Release --no-restore` は警告 0・エラー 0。`git diff --check` も成功。
+- コミット: 未実施（この作業ツリーに実装済み）。
+- 残存リスク: WPF 画面上での実クリックによるチェック状態・無効表示の確認は未実施。モデルと XAML バインディング、および条件評価結果は自動テストと Release ビルドで確認済み。
 
 ### [ ] P2-F: Unknown・特殊値・エラー行の仕様確定
 

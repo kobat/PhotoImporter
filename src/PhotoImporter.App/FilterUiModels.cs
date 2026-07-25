@@ -152,8 +152,22 @@ namespace PhotoImporter.App
             {
                 if (_selectedField == value || value == null) return;
                 _selectedField = value;
-                RebuildChoices();
+
+                var includeUnknownChanged = _includeUnknown;
+                var includeNoSequenceChanged = _includeNoSequence;
+                var includeRejectedRatingChanged = _includeRejectedRating;
+                var caseSensitiveChanged = _caseSensitive && !CanUseCaseSensitivity;
+
                 _includeUnknown = false;
+                _includeNoSequence = false;
+                _includeRejectedRating = false;
+                if (caseSensitiveChanged) _caseSensitive = false;
+
+                RebuildChoices();
+                if (includeUnknownChanged) OnPropertyChanged(nameof(IncludeUnknown));
+                if (includeNoSequenceChanged) OnPropertyChanged(nameof(IncludeNoSequence));
+                if (includeRejectedRatingChanged) OnPropertyChanged(nameof(IncludeRejectedRating));
+                if (caseSensitiveChanged) OnPropertyChanged(nameof(CaseSensitive));
                 NotifyAll();
             }
         }
@@ -178,7 +192,15 @@ namespace PhotoImporter.App
         public string StartTimeText { get => _startTimeText; set { if (Set(ref _startTimeText, value ?? string.Empty)) NotifyValidation(); } }
         public string EndTimeText { get => _endTimeText; set { if (Set(ref _endTimeText, value ?? string.Empty)) NotifyValidation(); } }
         public string TimeZoneSpecifier { get => _timeZoneSpecifier; set { if (Set(ref _timeZoneSpecifier, value ?? string.Empty)) NotifyValidation(); } }
-        public bool CaseSensitive { get => _caseSensitive; set { if (Set(ref _caseSensitive, value)) NotifyValidation(); } }
+        public bool CaseSensitive
+        {
+            get => _caseSensitive;
+            set
+            {
+                var supportedValue = CanUseCaseSensitivity && value;
+                if (Set(ref _caseSensitive, supportedValue)) NotifyValidation();
+            }
+        }
         public bool IncludeUnknown { get => _includeUnknown; set { if (Set(ref _includeUnknown, value)) NotifyValidation(); } }
         public bool IncludeNoSequence { get => _includeNoSequence; set { if (Set(ref _includeNoSequence, value)) NotifyValidation(); } }
         public bool IncludeRejectedRating { get => _includeRejectedRating; set { if (Set(ref _includeRejectedRating, value)) NotifyValidation(); } }
@@ -191,6 +213,7 @@ namespace PhotoImporter.App
         public bool IsTimeZoneDate => SelectedField.Field == FilterField.TakenDateInTimeZone;
         public bool IsSequence => SelectedField.Field == FilterField.Sequence;
         public bool IsRating => SelectedField.Field == FilterField.Rating;
+        public bool CanUseCaseSensitivity => IsString && SelectedField.Field != FilterField.Extension;
         public bool CanIncludeUnknown => FilterFieldDefinition.Get(SelectedField.Field).CanBeUnknown;
         public bool IsValid { get { FilterCondition condition; string error; return TryBuild(out condition, out error); } }
         public string ValidationMessage { get { FilterCondition condition; string error; return TryBuild(out condition, out error) ? string.Empty : error; } }
@@ -207,7 +230,9 @@ namespace PhotoImporter.App
                 {
                     case FilterValueType.String:
                         condition = new StringFilterCondition(
-                            field, Pattern, SelectedStringMatchMode.Value, CaseSensitive, includeMatches, IncludeUnknown);
+                            field, Pattern, SelectedStringMatchMode.Value,
+                            field != FilterField.Extension && CaseSensitive,
+                            includeMatches, IncludeUnknown);
                         break;
                     case FilterValueType.Number:
                         decimal? minimum;
@@ -348,6 +373,8 @@ namespace PhotoImporter.App
                 case FilterValidationCode.InvalidRegularExpression: return "正規表現が正しくありません。";
                 case FilterValidationCode.TimeZoneRequired: return "タイムゾーンを指定してください。";
                 case FilterValidationCode.InvalidTimeZone: return "タイムゾーン指定が正しくありません。";
+                case FilterValidationCode.OptionNotSupported:
+                    return "「連番なし」と「Rejected」は、それぞれ {Sequence} と {Rating} でのみ使用できます。";
                 default: return "この条件を適用できません。";
             }
         }
@@ -359,6 +386,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(IsNumber)); OnPropertyChanged(nameof(IsDateTime));
             OnPropertyChanged(nameof(IsChoice)); OnPropertyChanged(nameof(IsTimeZoneDate));
             OnPropertyChanged(nameof(IsSequence)); OnPropertyChanged(nameof(IsRating));
+            OnPropertyChanged(nameof(CanUseCaseSensitivity));
             OnPropertyChanged(nameof(CanIncludeUnknown));
             NotifyValidation();
         }
