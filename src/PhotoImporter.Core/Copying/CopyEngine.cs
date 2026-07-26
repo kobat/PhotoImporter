@@ -65,6 +65,7 @@ namespace PhotoImporter.Core.Copying
             long completedBytes = 0;
             var cancelled = false;
             string batchError = null;
+            var resultsBySource = new Dictionary<string, CopyItemResult>(StringComparer.OrdinalIgnoreCase);
 
             Report(progress, 0, items.Count, 0, totalBytes, null);
             for (var index = 0; index < items.Count; index++)
@@ -76,6 +77,23 @@ namespace PhotoImporter.Core.Copying
                 }
 
                 var item = items[index];
+                if (item.DependsOnSourcePath != null)
+                {
+                    CopyItemResult dependency;
+                    if (!resultsBySource.TryGetValue(item.DependsOnSourcePath, out dependency) ||
+                        dependency.Status != CopyItemStatus.Copied)
+                    {
+                        var skipped = new CopyItemResult(
+                            item,
+                            CopyItemStatus.Failed,
+                            "関連先画像をコピーできなかったため、サイドカーをコピーしませんでした。",
+                            null);
+                        results.Add(skipped);
+                        resultsBySource[item.SourcePath] = skipped;
+                        Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
+                        continue;
+                    }
+                }
                 batchError = GetUnavailableRootError(sourceRoot, item.DestinationRoot);
                 if (batchError != null) break;
                 var currentTransferred = 0L;
@@ -87,27 +105,36 @@ namespace PhotoImporter.Core.Copying
                         Report(progress, index, items.Count, completedBytes + currentTransferred, totalBytes, item.SourcePath);
                     });
                     completedBytes += item.SourceSnapshot.FileSize;
-                    results.Add(new CopyItemResult(item, CopyItemStatus.Copied, null, null));
+                    var copied = new CopyItemResult(item, CopyItemStatus.Copied, null, null);
+                    results.Add(copied);
+                    resultsBySource[item.SourcePath] = copied;
                     Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
                 }
                 catch (OperationCanceledException)
                 {
                     cancelled = true;
-                    results.Add(new CopyItemResult(item, CopyItemStatus.Cancelled, "コピーをキャンセルしました。", null));
+                    var cancelledItem = new CopyItemResult(
+                        item, CopyItemStatus.Cancelled, "コピーをキャンセルしました。", null);
+                    results.Add(cancelledItem);
+                    resultsBySource[item.SourcePath] = cancelledItem;
                     break;
                 }
                 catch (CopyRecoveryException ex)
                 {
                     batchError = GetUnavailableRootError(sourceRoot, item.DestinationRoot);
                     if (batchError != null) break;
-                    results.Add(new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, ex.RecoveryPath));
+                    var failed = new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, ex.RecoveryPath);
+                    results.Add(failed);
+                    resultsBySource[item.SourcePath] = failed;
                     Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
                 }
                 catch (Exception ex)
                 {
                     batchError = GetUnavailableRootError(sourceRoot, item.DestinationRoot);
                     if (batchError != null) break;
-                    results.Add(new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, null));
+                    var failed = new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, null);
+                    results.Add(failed);
+                    resultsBySource[item.SourcePath] = failed;
                     Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
                 }
             }

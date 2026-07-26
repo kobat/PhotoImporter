@@ -36,6 +36,7 @@ namespace PhotoImporter.App
         private bool _isScanningExif;
         private bool _overwriteExisting;
         private SourceFileSelectionMode _sourceFileSelectionMode = SourceFileSelectionMode.MediaOnly;
+        private bool _associateSidecars;
         private bool _analyzeJpegOnlyForRawJpegPair = true;
         private bool _useExifCache = true;
         private bool _readExifInformation;
@@ -163,6 +164,12 @@ namespace PhotoImporter.App
                 NotifyExifSettingsSummaryChanged();
                 SettingsChanged();
             }
+        }
+
+        public bool AssociateSidecars
+        {
+            get => _associateSidecars;
+            set { if (Set(ref _associateSidecars, value)) SettingsChanged(); }
         }
 
         public bool ReadExifInformation
@@ -540,6 +547,7 @@ namespace PhotoImporter.App
                 }
                 var overwrite = OverwriteExisting;
                 var sourceFileSelectionMode = _sourceFileSelectionMode;
+                var associateSidecars = AssociateSidecars;
                 var rawJpegAnalysisMode = AnalyzeJpegOnlyForRawJpegPair
                     ? RawJpegAnalysisMode.JpegOnlyForPair
                     : RawJpegAnalysisMode.AnalyzeBoth;
@@ -571,6 +579,7 @@ namespace PhotoImporter.App
                     parseResult.Template,
                     overwrite,
                     sourceFileSelectionMode,
+                    associateSidecars,
                     rawJpegAnalysisMode,
                     useExifCache,
                     shouldReadExif,
@@ -628,7 +637,9 @@ namespace PhotoImporter.App
             {
                 var progress = new Progress<CopyProgress>(UpdateCopyProgress);
                 result = await Task.Run(() => new CopyEngine().Execute(
-                    selected.Select(item => item.CopyPlan),
+                    selected
+                        .OrderBy(item => item.IsAssociatedSidecar ? 1 : 0)
+                        .Select(item => item.CopyPlan),
                     Path.GetFullPath(SourceFolder),
                     progress,
                     _copyCancellation.Token));
@@ -847,6 +858,7 @@ namespace PhotoImporter.App
             ParsedTemplate template,
             bool overwriteExisting,
             SourceFileSelectionMode sourceFileSelectionMode,
+            bool associateSidecars,
             RawJpegAnalysisMode rawJpegAnalysisMode,
             bool useExifCache,
             bool readExifInformation,
@@ -865,20 +877,31 @@ namespace PhotoImporter.App
                     string.IsNullOrWhiteSpace(destinationVolume.FileSystemName)
                         ? "不明"
                         : destinationVolume.FileSystemName));
+            var destinationLookup = new FileSystemDestinationLookup(destinationRoot);
             var allocator = new DestinationAllocator(
                 template,
-                new FileSystemDestinationLookup(destinationRoot),
+                destinationLookup,
                 destinationTimestampPolicy,
                 overwriteExisting,
                 destinationRoot);
             var scan = new SourceFileEnumerator().Enumerate(
                 sourceRoot,
                 sourceFileSelectionMode,
+                associateSidecars,
                 cancellationToken);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
-            var files = scan.Files.OrderBy(
+            var sidecarPlan = SidecarAssociationPlan.Create(
+                associateSidecars
+                    ? (IEnumerable<string>)scan.Files
+                    : new string[0]);
+            warnings.AddRange(sidecarPlan.Warnings);
+            var files = scan.Files.Where(path =>
+                sourceFileSelectionMode == SourceFileSelectionMode.AllFiles ||
+                PhotoFileClassifier.IsSupported(path) ||
+                (associateSidecars && IsAssociatedSidecar(sidecarPlan, path)))
+                .OrderBy(
                 item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase).ToList();
             cancellationToken.ThrowIfCancellationRequested();
             var imagePreviewPlan = RawJpegAnalysisPlan.Create(
@@ -922,7 +945,10 @@ namespace PhotoImporter.App
                 warnings.AddRange(metadataScan.Warnings);
             }
 
-            foreach (var path in files)
+            var previewByPath = new Dictionary<string, PreviewItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in files
+                .OrderBy(item => IsAssociatedSidecar(sidecarPlan, item) ? 1 : 0)
+                .ThenBy(item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
@@ -951,10 +977,64 @@ namespace PhotoImporter.App
                             analysisSourceSnapshot.LastWriteTime,
                             analysisSourceSnapshot.LastWriteTimeUtc,
                             (sourceSnapshot.Attributes & FileAttributes.ReadOnly) != 0);
-                    var allocation = allocator.Allocate(context, sourceSnapshot.LastWriteTimeUtc);
+                    SidecarAssociation sidecarAssociation = null;
+                    var isAssociatedSidecar = associateSidecars &&
+                                              sidecarPlan.TryGetAssociation(path, out sidecarAssociation);
+                    DestinationAllocation allocation;
+                    string relatedSourcePath = null;
+                    string dependencySourcePath = null;
+                    if (isAssociatedSidecar)
+                    {
+                        PreviewItem parent;
+                        if (!previewByPath.TryGetValue(sidecarAssociation.ImagePath, out parent) ||
+                            parent.IsScanError ||
+                            string.IsNullOrWhiteSpace(parent.DestinationPath))
+                        {
+                            previewByPath[path] = PreviewItem.ForScanError(
+                                sourcePath,
+                                "関連先画像のコピー先を決定できません。");
+                            continue;
+                        }
+                        var sidecarRelativePath = SidecarDestinationPath.Derive(
+                            parent.DestinationPath,
+                            path,
+                            sidecarAssociation.NamingStyle);
+                        allocation = allocator.AllocateFixed(
+                            sidecarRelativePath,
+                            sourceSnapshot.Length,
+                            sourceSnapshot.LastWriteTimeUtc,
+                            parent.Warnings,
+                            parent.SequenceNumber,
+                            overwriteExisting);
+                        relatedSourcePath = parent.SourcePath;
+                        if (parent.CopyPlan != null)
+                            dependencySourcePath = Path.GetFullPath(sidecarAssociation.ImagePath);
+                    }
+                    else
+                    {
+                        Func<string, bool> orphanSidecarBlocker = null;
+                        if (associateSidecars && IsImageFile(path))
+                        {
+                            var sourceSidecars = sidecarPlan.GetSidecars(path);
+                            orphanSidecarBlocker = candidate =>
+                                IsBlockedByDestinationOnlySidecar(
+                                    candidate,
+                                    sourceSidecars,
+                                    destinationLookup);
+                        }
+                        allocation = allocator.Allocate(
+                            context,
+                            sourceSnapshot.LastWriteTimeUtc,
+                            orphanSidecarBlocker);
+                    }
                     var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
-                    var plan = allocation.Status == DestinationStatus.NotImported ||
-                               allocation.Status == DestinationStatus.Overwrite
+                    var effectiveStatus = isAssociatedSidecar &&
+                                          previewByPath[sidecarAssociation.ImagePath].DestinationStatus ==
+                                          DestinationStatus.Conflict
+                        ? DestinationStatus.Conflict
+                        : allocation.Status;
+                    var plan = effectiveStatus == DestinationStatus.NotImported ||
+                               effectiveStatus == DestinationStatus.Overwrite
                         ? new CopyPlanItem(
                             sourceSnapshot.FullName,
                             destinationRoot,
@@ -962,25 +1042,105 @@ namespace PhotoImporter.App
                             new FileSnapshot(sourceSnapshot.Length, sourceSnapshot.LastWriteTimeUtc),
                             allocation.DestinationSnapshot,
                             destinationTimestampPolicy,
-                            allocation.Status == DestinationStatus.Overwrite)
+                            effectiveStatus == DestinationStatus.Overwrite,
+                            dependencySourcePath)
                         : null;
-                    result.Add(new PreviewItem(
+                    previewByPath[path] = new PreviewItem(
                         sourcePath,
                         allocation.RelativePath,
-                        allocation.Status,
+                        effectiveStatus,
                         plan,
                         allocation.Warnings,
                         context,
                         metadataResult,
                         analysisPlan == null ? null : MakeRelative(sourceRoot, analysisSource),
                         allocation.SequenceNumber,
-                        MakeRelative(sourceRoot, imagePreviewSource)));
+                        MakeRelative(sourceRoot, imagePreviewSource),
+                        relatedSourcePath);
                 }
-                catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
-                catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
-                catch (TemplateException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString())); }
+                catch (UnauthorizedAccessException ex) { previewByPath[path] = PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message); }
+                catch (IOException ex) { previewByPath[path] = PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message); }
+                catch (TemplateException ex) { previewByPath[path] = PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Error.Code.ToString()); }
+            }
+
+            if (associateSidecars)
+                ApplySidecarGroupConflicts(sidecarPlan, previewByPath);
+            foreach (var path in files)
+            {
+                PreviewItem item;
+                if (previewByPath.TryGetValue(path, out item)) result.Add(item);
             }
             return new PreviewBuildResult(result, warnings);
+        }
+
+        private static bool IsAssociatedSidecar(SidecarAssociationPlan plan, string path)
+        {
+            SidecarAssociation ignored;
+            return plan.TryGetAssociation(path, out ignored);
+        }
+
+        private static bool IsImageFile(string path)
+        {
+            var type = PhotoFileClassifier.Classify(path);
+            return type == PhotoFileType.Jpeg ||
+                   type == PhotoFileType.Raw ||
+                   type == PhotoFileType.OtherImage;
+        }
+
+        private static bool IsBlockedByDestinationOnlySidecar(
+            string imageRelativePath,
+            IReadOnlyList<SidecarAssociation> sourceSidecars,
+            IDestinationFileLookup destinationLookup)
+        {
+            var representedPaths = new HashSet<string>(
+                sourceSidecars.Select(sidecar => SidecarDestinationPath.Derive(
+                    imageRelativePath,
+                    sidecar.SidecarPath,
+                    sidecar.NamingStyle)),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var potentialPath in SidecarDestinationPath.GetPotentialXmpPaths(imageRelativePath))
+            {
+                if (representedPaths.Contains(potentialPath)) continue;
+                DestinationFileSnapshot ignored;
+                if (destinationLookup.TryGetFile(potentialPath, out ignored)) return true;
+            }
+            return false;
+        }
+
+        private static void ApplySidecarGroupConflicts(
+            SidecarAssociationPlan plan,
+            IReadOnlyDictionary<string, PreviewItem> previewByPath)
+        {
+            foreach (var imagePair in previewByPath.Where(pair => IsImageFile(pair.Key)))
+            {
+                var associations = plan.GetSidecars(imagePair.Key);
+                if (associations.Count == 0) continue;
+                var parent = imagePair.Value;
+                var children = associations
+                    .Select(association =>
+                    {
+                        PreviewItem child;
+                        return previewByPath.TryGetValue(association.SidecarPath, out child) ? child : null;
+                    })
+                    .Where(child => child != null)
+                    .ToList();
+
+                if (parent.DestinationStatus == DestinationStatus.Conflict)
+                {
+                    foreach (var child in children.Where(child => child.CanCopy))
+                        child.BlockByRelatedConflict("関連先画像が競合しています。");
+                    continue;
+                }
+
+                if (parent.CopyPlan != null &&
+                    children.Any(child => child.IsScanError ||
+                                          child.DestinationStatus == DestinationStatus.Conflict))
+                {
+                    parent.BlockByRelatedConflict("関連サイドカーが競合または読取エラーです。");
+                    foreach (var child in children.Where(child => child.CanCopy))
+                        child.BlockByRelatedConflict("関連先画像と同時にコピーできません。");
+                }
+            }
         }
 
         private void PreviewItem_PropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -988,6 +1148,37 @@ namespace PhotoImporter.App
             if (e.PropertyName == nameof(PreviewItem.IsSelected))
             {
                 if (_isUpdatingSelection) return;
+                var changed = sender as PreviewItem;
+                _isUpdatingSelection = true;
+                try
+                {
+                    if (changed != null && changed.IsAssociatedSidecar && changed.IsSelected)
+                    {
+                        var parent = Items.FirstOrDefault(item => string.Equals(
+                            item.SourcePath,
+                            changed.RelatedSourcePath,
+                            StringComparison.OrdinalIgnoreCase));
+                        if (parent != null && parent.CanCopy) parent.IsSelected = true;
+                        else if (parent != null && parent.DestinationStatus != DestinationStatus.Imported)
+                            changed.IsSelected = false;
+                    }
+                    else if (changed != null && !changed.IsAssociatedSidecar && !changed.IsSelected)
+                    {
+                        foreach (var child in Items.Where(item =>
+                            item.IsAssociatedSidecar &&
+                            string.Equals(
+                                item.RelatedSourcePath,
+                                changed.SourcePath,
+                                StringComparison.OrdinalIgnoreCase)))
+                        {
+                            child.IsSelected = false;
+                        }
+                    }
+                }
+                finally
+                {
+                    _isUpdatingSelection = false;
+                }
                 OnPropertyChanged(nameof(CanCopy));
                 UpdateSummary();
             }
@@ -1373,6 +1564,7 @@ namespace PhotoImporter.App
                 : settings.TemplateText;
             _overwriteExisting = settings.OverwriteExisting;
             _sourceFileSelectionMode = settings.SourceFileSelectionMode;
+            _associateSidecars = settings.AssociateSidecars;
             _analyzeJpegOnlyForRawJpegPair = settings.AnalyzeJpegOnlyForRawJpegPair;
             _useExifCache = settings.UseExifCache;
             _readExifInformation = settings.ReadExifInformation;
@@ -1394,6 +1586,7 @@ namespace PhotoImporter.App
                 TemplateText = TemplateText,
                 OverwriteExisting = OverwriteExisting,
                 SourceFileSelectionMode = _sourceFileSelectionMode,
+                AssociateSidecars = AssociateSidecars,
                 AnalyzeJpegOnlyForRawJpegPair = AnalyzeJpegOnlyForRawJpegPair,
                 UseExifCache = UseExifCache,
                 ReadExifInformation = ReadExifInformation,
@@ -1758,6 +1951,7 @@ namespace PhotoImporter.App
             PhotoMetadataReadResult.ReadError(new IOException("File information could not be read during scanning."));
         private bool _isSelected;
         private string _copyError;
+        private string _relatedConflictMessage;
 
         public PreviewItem(
             string sourcePath,
@@ -1769,7 +1963,8 @@ namespace PhotoImporter.App
             PhotoMetadataReadResult metadataResult = null,
             string metadataSourcePath = null,
             int? sequenceNumber = null,
-            string imagePreviewSourcePath = null)
+            string imagePreviewSourcePath = null,
+            string relatedSourcePath = null)
         {
             SourcePath = sourcePath;
             DestinationPath = destinationPath;
@@ -1783,20 +1978,23 @@ namespace PhotoImporter.App
             ImagePreviewSourcePath = string.IsNullOrWhiteSpace(imagePreviewSourcePath)
                 ? sourcePath
                 : imagePreviewSourcePath;
+            RelatedSourcePath = relatedSourcePath;
             _isSelected = CanCopy;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
         public string SourcePath { get; }
         public string DestinationPath { get; }
-        public DestinationStatus DestinationStatus { get; }
-        public CopyPlanItem CopyPlan { get; }
+        public DestinationStatus DestinationStatus { get; private set; }
+        public CopyPlanItem CopyPlan { get; private set; }
         public IReadOnlyList<TemplateWarningCode> Warnings { get; }
         public FileTemplateContext TemplateContext { get; private set; }
         public PhotoMetadataReadResult MetadataResult { get; private set; }
         public string MetadataSourcePath { get; private set; }
         public int? SequenceNumber { get; }
         public string ImagePreviewSourcePath { get; }
+        public string RelatedSourcePath { get; }
+        public bool IsAssociatedSidecar => !string.IsNullOrWhiteSpace(RelatedSourcePath);
         public bool CanCopy => CopyPlan != null && !IsScanError && _copyError == null;
         public bool IsScanError { get; private set; }
         public string ErrorMessage { get; private set; }
@@ -1823,6 +2021,8 @@ namespace PhotoImporter.App
             {
                 if (_copyError != null) return "コピーエラー: " + _copyError;
                 if (IsScanError) return "スキャンエラー: " + ErrorMessage;
+                if (_relatedConflictMessage != null)
+                    return "関連ファイル競合: " + _relatedConflictMessage;
                 string status;
                 switch (DestinationStatus)
                 {
@@ -1831,12 +2031,28 @@ namespace PhotoImporter.App
                     case DestinationStatus.Conflict: status = "競合"; break;
                     default: status = "未取込"; break;
                 }
+                if (IsAssociatedSidecar) status = "サイドカー" + status;
                 if (Warnings.Contains(TemplateWarningCode.TakenDateFallbackToModifiedDate))
                     status += "（撮影日時なし: 更新日時を使用）";
                 else if (Warnings.Contains(TemplateWarningCode.TakenDateOffsetMissing))
                     status += "（Exif時差なし）";
+                if (Warnings.Contains(TemplateWarningCode.OrphanSidecarForcedSequence))
+                    status += "（孤立XMPを避けて連番を使用）";
                 return status;
             }
+        }
+
+        internal void BlockByRelatedConflict(string message)
+        {
+            _relatedConflictMessage = string.IsNullOrWhiteSpace(message)
+                ? "関連ファイルを安全にコピーできません。"
+                : message;
+            DestinationStatus = DestinationStatus.Conflict;
+            CopyPlan = null;
+            _isSelected = false;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCopy)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
         }
 
         public void SetCopyError(string error)

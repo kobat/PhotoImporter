@@ -30,7 +30,8 @@ namespace PhotoImporter.Core.Copying
             FileSnapshot sourceSnapshot,
             DestinationFileSnapshot destinationSnapshot,
             FileSystemTimestampPolicy destinationTimestampPolicy,
-            bool overwrite)
+            bool overwrite,
+            string dependsOnSourcePath = null)
         {
             SourcePath = sourcePath ?? throw new ArgumentNullException(nameof(sourcePath));
             DestinationRoot = destinationRoot ?? throw new ArgumentNullException(nameof(destinationRoot));
@@ -43,6 +44,9 @@ namespace PhotoImporter.Core.Copying
                 throw new NotSupportedException(
                     "Unsupported destination file system: " + DestinationTimestampPolicy.FileSystemName);
             Overwrite = overwrite;
+            DependsOnSourcePath = string.IsNullOrWhiteSpace(dependsOnSourcePath)
+                ? null
+                : Path.GetFullPath(dependsOnSourcePath);
 
             var root = NormalizeRoot(DestinationRoot);
             var destination = Path.GetFullPath(DestinationPath);
@@ -57,6 +61,7 @@ namespace PhotoImporter.Core.Copying
         public DestinationFileSnapshot DestinationSnapshot { get; }
         public FileSystemTimestampPolicy DestinationTimestampPolicy { get; }
         public bool Overwrite { get; }
+        public string DependsOnSourcePath { get; }
 
         private static string NormalizeRoot(string path)
         {

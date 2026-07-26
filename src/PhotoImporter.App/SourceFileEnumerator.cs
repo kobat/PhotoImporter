@@ -42,6 +42,15 @@ namespace PhotoImporter.App
             SourceFileSelectionMode selectionMode,
             System.Threading.CancellationToken cancellationToken)
         {
+            return Enumerate(sourceRoot, selectionMode, false, cancellationToken);
+        }
+
+        public SourceScanResult Enumerate(
+            string sourceRoot,
+            SourceFileSelectionMode selectionMode,
+            bool includeSidecarCandidates,
+            System.Threading.CancellationToken cancellationToken)
+        {
             if (sourceRoot == null) throw new ArgumentNullException(nameof(sourceRoot));
             if (!Enum.IsDefined(typeof(SourceFileSelectionMode), selectionMode))
                 throw new ArgumentOutOfRangeException(nameof(selectionMode));
@@ -79,7 +88,7 @@ namespace PhotoImporter.App
                                 pending.Push(entry.FullPath);
                         }
                         else if (!ExcludedFileNames.Contains(entry.Name) &&
-                                 ShouldInclude(entry.FullPath, selectionMode))
+                                 ShouldInclude(entry.FullPath, selectionMode, includeSidecarCandidates))
                         {
                             result.Files.Add(entry.FullPath);
                         }
@@ -96,8 +105,13 @@ namespace PhotoImporter.App
             return result;
         }
 
-        private static bool ShouldInclude(string path, SourceFileSelectionMode selectionMode)
+        private static bool ShouldInclude(
+            string path,
+            SourceFileSelectionMode selectionMode,
+            bool includeSidecarCandidates)
         {
+            if (includeSidecarCandidates && SidecarAssociationPlan.IsSidecarCandidate(path))
+                return true;
             switch (selectionMode)
             {
                 case SourceFileSelectionMode.MediaOnly:

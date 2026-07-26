@@ -104,6 +104,94 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(2, result.SequenceNumber);
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void DestinationOnlySidecarSkipsImageCandidateRegardlessOfOverwrite(bool overwrite)
+        {
+            var result = CreateAllocator(
+                    new Dictionary<string, DestinationFileSnapshot>(),
+                    overwrite)
+                .Allocate(
+                    Context("A.jpg", 100),
+                    SourceTime,
+                    candidate => candidate == "A.jpg");
+
+            Assert.Equal("A_001.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.NotImported, result.Status);
+            Assert.Equal(1, result.SequenceNumber);
+            Assert.Contains(
+                TemplateWarningCode.OrphanSidecarForcedSequence,
+                result.Warnings);
+        }
+
+        [Fact]
+        public void MatchingImagePinsSequenceEvenWhenDestinationSidecarExists()
+        {
+            var files = new Dictionary<string, DestinationFileSnapshot>
+            {
+                ["A.jpg"] = Snapshot(100, SourceTime)
+            };
+
+            var result = CreateAllocator(files).Allocate(
+                Context("A.jpg", 100),
+                SourceTime,
+                candidate => true);
+
+            Assert.Equal("A.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.Imported, result.Status);
+            Assert.DoesNotContain(
+                TemplateWarningCode.OrphanSidecarForcedSequence,
+                result.Warnings);
+        }
+
+        [Fact]
+        public void DestinationOnlySidecarIsConflictWithoutSequence()
+        {
+            var allocator = new DestinationAllocator(
+                Parse("{OriginalName}"),
+                new DictionaryLookup(new Dictionary<string, DestinationFileSnapshot>()),
+                FileSystemTimestampPolicy.Create("NTFS"),
+                true);
+
+            var result = allocator.Allocate(
+                Context("A.jpg", 100),
+                SourceTime,
+                candidate => true);
+
+            Assert.Equal("A.jpg", result.RelativePath);
+            Assert.Equal(DestinationStatus.Conflict, result.Status);
+            Assert.Contains(
+                TemplateWarningCode.OrphanSidecarForcedSequence,
+                result.Warnings);
+        }
+
+        [Theory]
+        [InlineData(false, DestinationStatus.Conflict)]
+        [InlineData(true, DestinationStatus.Overwrite)]
+        public void FixedSidecarUsesOverwriteSettingWithoutChangingSequence(
+            bool overwrite,
+            DestinationStatus expectedStatus)
+        {
+            var files = new Dictionary<string, DestinationFileSnapshot>
+            {
+                ["A_001.xmp"] = Snapshot(50, SourceTime.AddMinutes(-1))
+            };
+            var allocator = CreateAllocator(files, overwrite);
+
+            var result = allocator.AllocateFixed(
+                "A_001.xmp",
+                80,
+                SourceTime,
+                new TemplateWarningCode[0],
+                1,
+                overwrite);
+
+            Assert.Equal("A_001.xmp", result.RelativePath);
+            Assert.Equal(expectedStatus, result.Status);
+            Assert.Equal(1, result.SequenceNumber);
+        }
+
         [Fact]
         public void WithoutSequenceOlderDestinationIsOverwriteWhenEnabled()
         {

@@ -19,6 +19,7 @@ namespace PhotoImporter.Core.Tests
 
             Assert.Equal(PhotoImporterSettings.DefaultTemplate, settings.TemplateText);
             Assert.Equal(SourceFileSelectionMode.MediaOnly, settings.SourceFileSelectionMode);
+            Assert.False(settings.AssociateSidecars);
             Assert.True(settings.AnalyzeJpegOnlyForRawJpegPair);
             Assert.True(settings.UseExifCache);
             Assert.False(settings.ReadExifInformation);
@@ -41,6 +42,7 @@ namespace PhotoImporter.Core.Tests
                 TemplateText = @"{TakenDate:yyyy}\A&B\{FileName}{Extension}",
                 OverwriteExisting = true,
                 SourceFileSelectionMode = SourceFileSelectionMode.AllFiles,
+                AssociateSidecars = true,
                 AnalyzeJpegOnlyForRawJpegPair = false,
                 UseExifCache = false,
                 ReadExifInformation = true,
@@ -58,6 +60,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(settings.TemplateText, loaded.TemplateText);
             Assert.True(loaded.OverwriteExisting);
             Assert.Equal(SourceFileSelectionMode.AllFiles, loaded.SourceFileSelectionMode);
+            Assert.True(loaded.AssociateSidecars);
             Assert.False(loaded.AnalyzeJpegOnlyForRawJpegPair);
             Assert.False(loaded.UseExifCache);
             Assert.True(loaded.ReadExifInformation);

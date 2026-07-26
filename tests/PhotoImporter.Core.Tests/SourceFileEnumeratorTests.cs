@@ -51,6 +51,26 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void SidecarCandidateCanBeCollectedWithoutIncludingOtherFiles()
+        {
+            var root = @"E:\";
+            var fileSystem = new FakeSourceFileSystem(root)
+                .AddFile(root, "photo.jpg")
+                .AddFile(root, "photo.xmp")
+                .AddFile(root, "notes.txt");
+
+            var result = new SourceFileEnumerator(fileSystem).Enumerate(
+                root,
+                SourceFileSelectionMode.MediaOnly,
+                true,
+                CancellationToken.None);
+
+            Assert.Equal(
+                new[] { @"E:\photo.jpg", @"E:\photo.xmp" },
+                result.Files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+        }
+
+        [Fact]
         public void AllFilesModeStillExcludesKnownSystemFilesAndAreas()
         {
             var root = @"E:\";

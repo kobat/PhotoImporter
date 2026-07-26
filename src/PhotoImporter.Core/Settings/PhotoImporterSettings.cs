@@ -16,6 +16,7 @@ namespace PhotoImporter.Core.Settings
         {
             TemplateText = DefaultTemplate;
             SourceFileSelectionMode = SourceFileSelectionMode.MediaOnly;
+            AssociateSidecars = false;
             AnalyzeJpegOnlyForRawJpegPair = true;
             UseExifCache = true;
             ReadExifInformation = false;
@@ -28,6 +29,7 @@ namespace PhotoImporter.Core.Settings
         public string TemplateText { get; set; }
         public bool OverwriteExisting { get; set; }
         public SourceFileSelectionMode SourceFileSelectionMode { get; set; }
+        public bool AssociateSidecars { get; set; }
         public bool AnalyzeJpegOnlyForRawJpegPair { get; set; }
         public bool UseExifCache { get; set; }
         public bool ReadExifInformation { get; set; }
@@ -86,6 +88,7 @@ namespace PhotoImporter.Core.Settings
                         root,
                         "SourceFileSelectionMode",
                         SourceFileSelectionMode.MediaOnly),
+                    AssociateSidecars = ReadBoolean(root, "AssociateSidecars", false),
                     AnalyzeJpegOnlyForRawJpegPair = ReadBoolean(root, "AnalyzeJpegOnlyForRawJpegPair", true),
                     UseExifCache = ReadBoolean(root, "UseExifCache", true),
                     ReadExifInformation = ReadBoolean(root, "ReadExifInformation", false),
@@ -142,6 +145,7 @@ namespace PhotoImporter.Core.Settings
                             : settings.TemplateText),
                         new XElement("OverwriteExisting", settings.OverwriteExisting),
                         new XElement("SourceFileSelectionMode", settings.SourceFileSelectionMode),
+                        new XElement("AssociateSidecars", settings.AssociateSidecars),
                         new XElement("AnalyzeJpegOnlyForRawJpegPair", settings.AnalyzeJpegOnlyForRawJpegPair),
                         new XElement("UseExifCache", settings.UseExifCache),
                         new XElement("ReadExifInformation", settings.ReadExifInformation),

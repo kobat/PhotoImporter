@@ -23,7 +23,7 @@ namespace PhotoImporter.App
 
         public IEnumerable<PreviewItem> VisibleItems => View.Cast<PreviewItem>();
         public IEnumerable<PreviewItem> CopyTargets =>
-            Items.Where(item => item.CanCopy && item.IsSelected);
+            Items.Where(item => item.CanCopy && item.IsSelected && IsRelatedSelectionValid(item));
 
         public void ApplyFilter(Predicate<PreviewItem> filter)
         {
@@ -52,13 +52,17 @@ namespace PhotoImporter.App
             var visible = new HashSet<PreviewItem>(VisibleItems);
             foreach (var item in Items.Where(item => item.CanCopy && !visible.Contains(item)))
                 item.IsSelected = false;
+            EnforceRelatedSelection();
         }
 
         public bool? GetVisibleSelectAllState() =>
             PreviewSelectionState.GetSelectAllState(VisibleItems);
 
-        public void SetAllVisibleCopyable(bool isSelected) =>
+        public void SetAllVisibleCopyable(bool isSelected)
+        {
             PreviewSelectionState.SetAllCopyable(VisibleItems, isSelected);
+            EnforceRelatedSelection();
+        }
 
         public PreviewItemCounts GetCounts()
         {
@@ -69,6 +73,29 @@ namespace PhotoImporter.App
                 Items.Count,
                 checkedItems.Count,
                 checkedItems.Count(item => !visible.Contains(item)));
+        }
+
+        private bool IsRelatedSelectionValid(PreviewItem item)
+        {
+            if (!item.IsAssociatedSidecar) return true;
+            var parent = Items.FirstOrDefault(candidate => string.Equals(
+                candidate.SourcePath,
+                item.RelatedSourcePath,
+                StringComparison.OrdinalIgnoreCase));
+            return parent != null &&
+                   (parent.DestinationStatus == PhotoImporter.Core.Templates.DestinationStatus.Imported ||
+                    (parent.CanCopy && parent.IsSelected));
+        }
+
+        private void EnforceRelatedSelection()
+        {
+            foreach (var sidecar in Items.Where(item =>
+                item.IsAssociatedSidecar &&
+                item.IsSelected &&
+                !IsRelatedSelectionValid(item)))
+            {
+                sidecar.IsSelected = false;
+            }
         }
     }
 

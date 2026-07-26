@@ -150,6 +150,10 @@
                 <CheckBox Content="画像・動画以外のファイルも含める"
                           IsChecked="{Binding IncludeOtherFiles}"
                           ToolTip="有効にすると、既知のシステム管理項目を除くすべての通常ファイルをコピー対象としてスキャンします。" />
+                <CheckBox Content="同名のXMPサイドカーを画像に関連付ける"
+                          Margin="0,6,0,0"
+                          IsChecked="{Binding AssociateSidecars}"
+                          ToolTip="画像と同じフォルダー・同じ名前のXMPを、画像のコピー先名と連番へ追従させます。" />
                 <CheckBox Content="RAW+JPEGペアではJPEGのみ解析する"
                           Margin="0,6,0,0"
                           IsChecked="{Binding AnalyzeJpegOnlyForRawJpegPair}" />
@@ -322,6 +326,7 @@
                     </DataGridCheckBoxColumn.Header>
                 </DataGridCheckBoxColumn>
                 <DataGridTextColumn Header="コピー元" Binding="{Binding SourcePath}" Width="2*" IsReadOnly="True" />
+                <DataGridTextColumn Header="関連先" Binding="{Binding RelatedSourcePath}" Width="140" IsReadOnly="True" />
                 <DataGridTextColumn Header="コピー先（予定）" Binding="{Binding DestinationPath}" Width="3*" IsReadOnly="True" />
                 <DataGridTextColumn Header="状態" Binding="{Binding Status}" Width="180" IsReadOnly="True" />
             </DataGrid.Columns>

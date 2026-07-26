@@ -56,7 +56,8 @@ namespace PhotoImporter.Core.Templates
     public enum TemplateWarningCode
     {
         TakenDateOffsetMissing,
-        TakenDateFallbackToModifiedDate
+        TakenDateFallbackToModifiedDate,
+        OrphanSidecarForcedSequence
     }
 
     public sealed class TemplateEvaluation

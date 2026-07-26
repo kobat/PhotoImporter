@@ -307,6 +307,61 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void CopiesSidecarOnlyAfterItsImageSucceeds()
+        {
+            var image = CreateFile("card\\photo.jpg", new byte[] { 1, 2 });
+            var sidecar = CreateFile("card\\photo.xmp", new byte[] { 3 });
+            var imageDestination = Path.Combine(_root, "out", "photo.jpg");
+            var sidecarDestination = Path.Combine(_root, "out", "photo.xmp");
+
+            var result = new CopyEngine().Execute(
+                new[]
+                {
+                    CreatePlan(image, imageDestination, null, false),
+                    CreatePlan(sidecar, sidecarDestination, null, false, image)
+                },
+                null,
+                CancellationToken.None);
+
+            Assert.Equal(
+                new[] { CopyItemStatus.Copied, CopyItemStatus.Copied },
+                result.Items.Select(item => item.Status).ToArray());
+            Assert.True(File.Exists(imageDestination));
+            Assert.True(File.Exists(sidecarDestination));
+        }
+
+        [Fact]
+        public void SkipsSidecarWhenItsImageFails()
+        {
+            var image = CreateFile("card\\changed.jpg", new byte[] { 1 });
+            var sidecar = CreateFile("card\\changed.xmp", new byte[] { 2 });
+            var imagePlan = CreatePlan(
+                image,
+                Path.Combine(_root, "out", "changed.jpg"),
+                null,
+                false);
+            var sidecarDestination = Path.Combine(_root, "out", "changed.xmp");
+            var sidecarPlan = CreatePlan(
+                sidecar,
+                sidecarDestination,
+                null,
+                false,
+                image);
+            File.AppendAllText(image, "changed");
+
+            var result = new CopyEngine().Execute(
+                new[] { imagePlan, sidecarPlan },
+                null,
+                CancellationToken.None);
+
+            Assert.Equal(
+                new[] { CopyItemStatus.Failed, CopyItemStatus.Failed },
+                result.Items.Select(item => item.Status).ToArray());
+            Assert.Contains("関連先画像", result.Items[1].Error);
+            Assert.False(File.Exists(sidecarDestination));
+        }
+
+        [Fact]
         public void AbortsBatchWithoutPerFileFailuresWhenDestinationRootBecomesUnavailable()
         {
             var sourceRoot = Path.Combine(_root, "card");
@@ -368,7 +423,8 @@ namespace PhotoImporter.Core.Tests
             string source,
             string destination,
             DestinationFileSnapshot destinationSnapshot,
-            bool overwrite)
+            bool overwrite,
+            string dependsOnSourcePath = null)
         {
             var sourceInfo = new FileInfo(source);
             return new CopyPlanItem(
@@ -378,7 +434,8 @@ namespace PhotoImporter.Core.Tests
                 new FileSnapshot(sourceInfo.Length, sourceInfo.LastWriteTimeUtc),
                 destinationSnapshot,
                 FileSystemTimestampPolicy.Create("NTFS"),
-                overwrite);
+                overwrite,
+                dependsOnSourcePath);
         }
 
         private static CopyEngine CreateEngineWithMove(MoveFileOperation moveFile) =>

@@ -40,6 +40,48 @@ namespace PhotoImporter.Core.Tests
             Assert.Contains("write failed", item.Status);
         }
 
+        [Fact]
+        public void SidecarIsNotACopyTargetWhenCopyableParentIsUnselected()
+        {
+            var parent = CreateItem("photo.jpg", DestinationStatus.NotImported, true);
+            var sidecar = CreateItem(
+                "photo.xmp",
+                DestinationStatus.NotImported,
+                true,
+                "photo.jpg");
+            parent.IsSelected = false;
+            var state = CreateCollectionState(parent, sidecar);
+
+            Assert.DoesNotContain(sidecar, state.CopyTargets);
+        }
+
+        [Fact]
+        public void SidecarCanBeCopiedWhenParentImageIsAlreadyImported()
+        {
+            var parent = CreateItem("photo.jpg", DestinationStatus.Imported, false);
+            var sidecar = CreateItem(
+                "photo.xmp",
+                DestinationStatus.NotImported,
+                true,
+                "photo.jpg");
+            var state = CreateCollectionState(parent, sidecar);
+
+            Assert.Contains(sidecar, state.CopyTargets);
+        }
+
+        [Fact]
+        public void RelatedConflictDisablesCopyPlanAndSelection()
+        {
+            var item = CreateItem("photo.jpg", DestinationStatus.NotImported, true);
+
+            item.BlockByRelatedConflict("xmp conflict");
+
+            Assert.False(item.CanCopy);
+            Assert.False(item.IsSelected);
+            Assert.Equal(DestinationStatus.Conflict, item.DestinationStatus);
+            Assert.Contains("xmp conflict", item.Status);
+        }
+
         [Theory]
         [InlineData(DestinationStatus.NotImported, true, true)]
         [InlineData(DestinationStatus.Overwrite, true, true)]
@@ -306,7 +348,8 @@ namespace PhotoImporter.Core.Tests
         private static PreviewItem CreateItem(
             string sourcePath,
             DestinationStatus status,
-            bool hasCopyPlan)
+            bool hasCopyPlan,
+            string relatedSourcePath = null)
         {
             var plan = hasCopyPlan
                 ? new CopyPlanItem(
@@ -320,7 +363,12 @@ namespace PhotoImporter.Core.Tests
                     FileSystemTimestampPolicy.Create("NTFS"),
                     status == DestinationStatus.Overwrite)
                 : null;
-            return new PreviewItem(sourcePath, sourcePath, status, plan);
+            return new PreviewItem(
+                sourcePath,
+                sourcePath,
+                status,
+                plan,
+                relatedSourcePath: relatedSourcePath);
         }
     }
 }
