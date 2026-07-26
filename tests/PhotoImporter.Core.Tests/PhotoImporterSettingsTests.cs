@@ -18,6 +18,7 @@ namespace PhotoImporter.Core.Tests
             var settings = store.Load();
 
             Assert.Equal(PhotoImporterSettings.DefaultTemplate, settings.TemplateText);
+            Assert.Equal(SourceFileSelectionMode.MediaOnly, settings.SourceFileSelectionMode);
             Assert.True(settings.AnalyzeJpegOnlyForRawJpegPair);
             Assert.True(settings.UseExifCache);
             Assert.False(settings.ReadExifInformation);
@@ -39,6 +40,7 @@ namespace PhotoImporter.Core.Tests
                 DestinationFolder = @"E:\写真",
                 TemplateText = @"{TakenDate:yyyy}\A&B\{FileName}{Extension}",
                 OverwriteExisting = true,
+                SourceFileSelectionMode = SourceFileSelectionMode.AllFiles,
                 AnalyzeJpegOnlyForRawJpegPair = false,
                 UseExifCache = false,
                 ReadExifInformation = true,
@@ -55,6 +57,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(settings.DestinationFolder, loaded.DestinationFolder);
             Assert.Equal(settings.TemplateText, loaded.TemplateText);
             Assert.True(loaded.OverwriteExisting);
+            Assert.Equal(SourceFileSelectionMode.AllFiles, loaded.SourceFileSelectionMode);
             Assert.False(loaded.AnalyzeJpegOnlyForRawJpegPair);
             Assert.False(loaded.UseExifCache);
             Assert.True(loaded.ReadExifInformation);
@@ -89,6 +92,23 @@ namespace PhotoImporter.Core.Tests
             var settings = store.Load();
 
             Assert.Null(settings.CustomExifCacheRoot);
+        }
+
+        [Fact]
+        public void MissingOrInvalidSourceFileSelectionModeUsesMediaOnly()
+        {
+            Directory.CreateDirectory(_root);
+            var settingsPath = Path.Combine(_root, "settings.xml");
+            File.WriteAllText(
+                settingsPath,
+                "<PhotoImporterSettings version=\"1\">" +
+                "<SourceFileSelectionMode>FutureMode</SourceFileSelectionMode>" +
+                "</PhotoImporterSettings>");
+            var store = new PhotoImporterSettingsStore(settingsPath);
+
+            var settings = store.Load();
+
+            Assert.Equal(SourceFileSelectionMode.MediaOnly, settings.SourceFileSelectionMode);
         }
 
         [Fact]

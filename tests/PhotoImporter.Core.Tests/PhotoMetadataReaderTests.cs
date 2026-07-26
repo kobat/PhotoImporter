@@ -48,6 +48,37 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void UnsupportedExtensionDoesNotRequireTheFileToExist()
+        {
+            var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".txt");
+
+            var result = new PhotoMetadataReader().Read(path);
+
+            Assert.Equal(PhotoMetadataReadStatus.Unsupported, result.Status);
+            Assert.Null(result.Error);
+            Assert.Same(PhotoMetadata.Empty, result.Metadata);
+        }
+
+        [Fact]
+        public void MalformedJpegIsReportedAsUnsupportedRatherThanAnIoFailure()
+        {
+            var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".jpg");
+            try
+            {
+                File.WriteAllBytes(path, new byte[] { 0xff, 0xd8, 0xff });
+
+                var result = new PhotoMetadataReader().Read(path);
+
+                Assert.Equal(PhotoMetadataReadStatus.Unsupported, result.Status);
+                Assert.Null(result.Error);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Fact]
         public void ExtractsPhotoMetadataFromLaterSonyArwSubIfd()
         {
             var ifd0 = new ExifIfd0Directory();

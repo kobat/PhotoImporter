@@ -15,6 +15,7 @@ namespace PhotoImporter.Core.Settings
         public PhotoImporterSettings()
         {
             TemplateText = DefaultTemplate;
+            SourceFileSelectionMode = SourceFileSelectionMode.MediaOnly;
             AnalyzeJpegOnlyForRawJpegPair = true;
             UseExifCache = true;
             ReadExifInformation = false;
@@ -26,6 +27,7 @@ namespace PhotoImporter.Core.Settings
         public string DestinationFolder { get; set; }
         public string TemplateText { get; set; }
         public bool OverwriteExisting { get; set; }
+        public SourceFileSelectionMode SourceFileSelectionMode { get; set; }
         public bool AnalyzeJpegOnlyForRawJpegPair { get; set; }
         public bool UseExifCache { get; set; }
         public bool ReadExifInformation { get; set; }
@@ -80,6 +82,10 @@ namespace PhotoImporter.Core.Settings
                     DestinationFolder = ReadOptional(root, "DestinationFolder"),
                     TemplateText = ReadOptional(root, "TemplateText") ?? PhotoImporterSettings.DefaultTemplate,
                     OverwriteExisting = ReadBoolean(root, "OverwriteExisting", false),
+                    SourceFileSelectionMode = ReadEnum(
+                        root,
+                        "SourceFileSelectionMode",
+                        SourceFileSelectionMode.MediaOnly),
                     AnalyzeJpegOnlyForRawJpegPair = ReadBoolean(root, "AnalyzeJpegOnlyForRawJpegPair", true),
                     UseExifCache = ReadBoolean(root, "UseExifCache", true),
                     ReadExifInformation = ReadBoolean(root, "ReadExifInformation", false),
@@ -135,6 +141,7 @@ namespace PhotoImporter.Core.Settings
                             ? PhotoImporterSettings.DefaultTemplate
                             : settings.TemplateText),
                         new XElement("OverwriteExisting", settings.OverwriteExisting),
+                        new XElement("SourceFileSelectionMode", settings.SourceFileSelectionMode),
                         new XElement("AnalyzeJpegOnlyForRawJpegPair", settings.AnalyzeJpegOnlyForRawJpegPair),
                         new XElement("UseExifCache", settings.UseExifCache),
                         new XElement("ReadExifInformation", settings.ReadExifInformation),
@@ -183,6 +190,18 @@ namespace PhotoImporter.Core.Settings
             var element = root.Element(name);
             bool value;
             return element != null && bool.TryParse(element.Value, out value) ? value : defaultValue;
+        }
+
+        private static T ReadEnum<T>(XElement root, string name, T defaultValue)
+            where T : struct
+        {
+            var element = root.Element(name);
+            T value;
+            return element != null &&
+                   Enum.TryParse(element.Value, true, out value) &&
+                   Enum.IsDefined(typeof(T), value)
+                ? value
+                : defaultValue;
         }
 
         private static string NormalizeOptionalAbsolutePath(string path)

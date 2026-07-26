@@ -35,6 +35,7 @@ namespace PhotoImporter.App
         private bool _isCopying;
         private bool _isScanningExif;
         private bool _overwriteExisting;
+        private SourceFileSelectionMode _sourceFileSelectionMode = SourceFileSelectionMode.MediaOnly;
         private bool _analyzeJpegOnlyForRawJpegPair = true;
         private bool _useExifCache = true;
         private bool _readExifInformation;
@@ -132,6 +133,19 @@ namespace PhotoImporter.App
         {
             get => _overwriteExisting;
             set { if (Set(ref _overwriteExisting, value)) SettingsChanged(); }
+        }
+
+        public bool IncludeOtherFiles
+        {
+            get => _sourceFileSelectionMode == SourceFileSelectionMode.AllFiles;
+            set
+            {
+                var mode = value
+                    ? SourceFileSelectionMode.AllFiles
+                    : SourceFileSelectionMode.MediaOnly;
+                if (!Set(ref _sourceFileSelectionMode, mode)) return;
+                SettingsChanged();
+            }
         }
 
         public bool AnalyzeJpegOnlyForRawJpegPair
@@ -525,6 +539,7 @@ namespace PhotoImporter.App
                     return false;
                 }
                 var overwrite = OverwriteExisting;
+                var sourceFileSelectionMode = _sourceFileSelectionMode;
                 var rawJpegAnalysisMode = AnalyzeJpegOnlyForRawJpegPair
                     ? RawJpegAnalysisMode.JpegOnlyForPair
                     : RawJpegAnalysisMode.AnalyzeBoth;
@@ -555,6 +570,7 @@ namespace PhotoImporter.App
                     destinationRoot,
                     parseResult.Template,
                     overwrite,
+                    sourceFileSelectionMode,
                     rawJpegAnalysisMode,
                     useExifCache,
                     shouldReadExif,
@@ -830,6 +846,7 @@ namespace PhotoImporter.App
             string destinationRoot,
             ParsedTemplate template,
             bool overwriteExisting,
+            SourceFileSelectionMode sourceFileSelectionMode,
             RawJpegAnalysisMode rawJpegAnalysisMode,
             bool useExifCache,
             bool readExifInformation,
@@ -854,7 +871,10 @@ namespace PhotoImporter.App
                 destinationTimestampPolicy,
                 overwriteExisting,
                 destinationRoot);
-            var scan = new SourceFileEnumerator().Enumerate(sourceRoot, cancellationToken);
+            var scan = new SourceFileEnumerator().Enumerate(
+                sourceRoot,
+                sourceFileSelectionMode,
+                cancellationToken);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
@@ -1352,6 +1372,7 @@ namespace PhotoImporter.App
                 ? PhotoImporterSettings.DefaultTemplate
                 : settings.TemplateText;
             _overwriteExisting = settings.OverwriteExisting;
+            _sourceFileSelectionMode = settings.SourceFileSelectionMode;
             _analyzeJpegOnlyForRawJpegPair = settings.AnalyzeJpegOnlyForRawJpegPair;
             _useExifCache = settings.UseExifCache;
             _readExifInformation = settings.ReadExifInformation;
@@ -1372,6 +1393,7 @@ namespace PhotoImporter.App
                 DestinationFolder = DestinationFolder,
                 TemplateText = TemplateText,
                 OverwriteExisting = OverwriteExisting,
+                SourceFileSelectionMode = _sourceFileSelectionMode,
                 AnalyzeJpegOnlyForRawJpegPair = AnalyzeJpegOnlyForRawJpegPair,
                 UseExifCache = UseExifCache,
                 ReadExifInformation = ReadExifInformation,

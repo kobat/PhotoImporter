@@ -147,7 +147,11 @@
 
         <Grid Grid.Row="4" Margin="112,0,0,10" IsEnabled="{Binding CanEditSettings}">
             <StackPanel>
+                <CheckBox Content="画像・動画以外のファイルも含める"
+                          IsChecked="{Binding IncludeOtherFiles}"
+                          ToolTip="有効にすると、既知のシステム管理項目を除くすべての通常ファイルをコピー対象としてスキャンします。" />
                 <CheckBox Content="RAW+JPEGペアではJPEGのみ解析する"
+                          Margin="0,6,0,0"
                           IsChecked="{Binding AnalyzeJpegOnlyForRawJpegPair}" />
                 <TextBlock Text="同じフォルダーにある同名のRAWとJPEGをペアとして扱います。ペアにならないRAWは個別に解析します"
                            Margin="20,2,0,0" Foreground="DimGray" TextWrapping="Wrap" />

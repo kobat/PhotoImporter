@@ -22,6 +22,21 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void OtherFileWithSameBaseNameRemainsIndependentFromRawJpegPair()
+        {
+            var jpeg = @"C:\card\DCIM\photo.jpg";
+            var raw = @"C:\card\DCIM\photo.arw";
+            var sidecar = @"C:\card\DCIM\photo.xmp";
+
+            var plan = RawJpegAnalysisPlan.Create(new[] { jpeg, raw, sidecar });
+
+            Assert.Equal(jpeg, plan.GetAnalysisSource(jpeg));
+            Assert.Equal(jpeg, plan.GetAnalysisSource(raw));
+            Assert.Equal(sidecar, plan.GetAnalysisSource(sidecar));
+            Assert.Equal(new[] { jpeg, sidecar }, plan.AnalysisSources);
+        }
+
+        [Fact]
         public void AnalyzeBothUsesEachPhysicalFile()
         {
             var paths = new[] { @"C:\card\photo.jpg", @"C:\card\photo.nef" };

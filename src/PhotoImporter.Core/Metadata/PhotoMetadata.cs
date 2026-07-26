@@ -177,6 +177,8 @@ namespace PhotoImporter.Core.Metadata
         public PhotoMetadataReadResult Read(string path)
         {
             if (path == null) throw new ArgumentNullException(nameof(path));
+            if (!PhotoFileClassifier.IsSupported(path))
+                return PhotoMetadataReadResult.Unsupported();
 
             try
             {
@@ -190,9 +192,42 @@ namespace PhotoImporter.Core.Metadata
             {
                 return PhotoMetadataReadResult.Unsupported();
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            catch (IOException ex)
+            {
+                return CanReadEntireFile(path)
+                    ? PhotoMetadataReadResult.Unsupported()
+                    : PhotoMetadataReadResult.ReadError(ex);
+            }
+            catch (UnauthorizedAccessException ex)
             {
                 return PhotoMetadataReadResult.ReadError(ex);
+            }
+        }
+
+        private static bool CanReadEntireFile(string path)
+        {
+            try
+            {
+                var buffer = new byte[128 * 1024];
+                using (var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    buffer.Length,
+                    FileOptions.SequentialScan))
+                {
+                    while (stream.Read(buffer, 0, buffer.Length) > 0) { }
+                }
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
             }
         }
 

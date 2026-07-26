@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using PhotoImporter.App;
+using PhotoImporter.Core.Settings;
 using Xunit;
 
 namespace PhotoImporter.Core.Tests
@@ -27,6 +28,49 @@ namespace PhotoImporter.Core.Tests
                 new[] { @"E:\clip.MP4", @"E:\negative.nEf", @"E:\photo.JPG" },
                 result.Files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
             Assert.Empty(result.Issues);
+        }
+
+        [Fact]
+        public void AllFilesModeIncludesUnsupportedAndExtensionlessFiles()
+        {
+            var root = @"E:\";
+            var fileSystem = new FakeSourceFileSystem(root)
+                .AddFile(root, "photo.JPG")
+                .AddFile(root, "notes.txt")
+                .AddFile(root, "README");
+
+            var result = new SourceFileEnumerator(fileSystem).Enumerate(
+                root,
+                SourceFileSelectionMode.AllFiles,
+                CancellationToken.None);
+
+            Assert.Equal(
+                new[] { @"E:\notes.txt", @"E:\photo.JPG", @"E:\README" },
+                result.Files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+            Assert.Empty(result.Issues);
+        }
+
+        [Fact]
+        public void AllFilesModeStillExcludesKnownSystemFilesAndAreas()
+        {
+            var root = @"E:\";
+            var fileSystem = new FakeSourceFileSystem(root)
+                .AddFile(root, "Thumbs.db")
+                .AddFile(root, "desktop.ini")
+                .AddFile(root, "autorun.inf")
+                .AddDirectory(root, "System Volume Information")
+                .AddDirectory(root, "$RECYCLE.BIN");
+
+            var result = new SourceFileEnumerator(fileSystem).Enumerate(
+                root,
+                SourceFileSelectionMode.AllFiles,
+                CancellationToken.None);
+
+            Assert.Equal(new[] { @"E:\autorun.inf" }, result.Files);
+            Assert.DoesNotContain(
+                fileSystem.RequestedDirectories,
+                path => path.IndexOf("System Volume Information", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        path.IndexOf("$RECYCLE.BIN", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         [Fact]

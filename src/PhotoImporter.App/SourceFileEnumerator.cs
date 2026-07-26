@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using PhotoImporter.Core.Metadata;
+using PhotoImporter.Core.Settings;
 
 namespace PhotoImporter.App
 {
@@ -30,7 +31,20 @@ namespace PhotoImporter.App
             string sourceRoot,
             System.Threading.CancellationToken cancellationToken)
         {
+            return Enumerate(
+                sourceRoot,
+                SourceFileSelectionMode.MediaOnly,
+                cancellationToken);
+        }
+
+        public SourceScanResult Enumerate(
+            string sourceRoot,
+            SourceFileSelectionMode selectionMode,
+            System.Threading.CancellationToken cancellationToken)
+        {
             if (sourceRoot == null) throw new ArgumentNullException(nameof(sourceRoot));
+            if (!Enum.IsDefined(typeof(SourceFileSelectionMode), selectionMode))
+                throw new ArgumentOutOfRangeException(nameof(selectionMode));
             var result = new SourceScanResult();
             var pending = new Stack<string>();
             pending.Push(sourceRoot);
@@ -65,7 +79,7 @@ namespace PhotoImporter.App
                                 pending.Push(entry.FullPath);
                         }
                         else if (!ExcludedFileNames.Contains(entry.Name) &&
-                                 PhotoFileClassifier.IsSupported(entry.FullPath))
+                                 ShouldInclude(entry.FullPath, selectionMode))
                         {
                             result.Files.Add(entry.FullPath);
                         }
@@ -80,6 +94,19 @@ namespace PhotoImporter.App
             }
 
             return result;
+        }
+
+        private static bool ShouldInclude(string path, SourceFileSelectionMode selectionMode)
+        {
+            switch (selectionMode)
+            {
+                case SourceFileSelectionMode.MediaOnly:
+                    return PhotoFileClassifier.IsSupported(path);
+                case SourceFileSelectionMode.AllFiles:
+                    return true;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(selectionMode));
+            }
         }
 
         private void EnsureSourceRootAvailable(string sourceRoot)
