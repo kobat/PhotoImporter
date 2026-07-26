@@ -18,6 +18,7 @@ namespace PhotoImporter.Core.Settings
             AnalyzeJpegOnlyForRawJpegPair = true;
             UseExifCache = true;
             ReadExifInformation = false;
+            ShowImagePreview = false;
             PreviousExifCacheRoots = new List<string>();
         }
 
@@ -28,6 +29,7 @@ namespace PhotoImporter.Core.Settings
         public bool AnalyzeJpegOnlyForRawJpegPair { get; set; }
         public bool UseExifCache { get; set; }
         public bool ReadExifInformation { get; set; }
+        public bool ShowImagePreview { get; set; }
         public string CustomExifCacheRoot { get; set; }
         public IList<string> PreviousExifCacheRoots { get; }
 
@@ -81,6 +83,7 @@ namespace PhotoImporter.Core.Settings
                     AnalyzeJpegOnlyForRawJpegPair = ReadBoolean(root, "AnalyzeJpegOnlyForRawJpegPair", true),
                     UseExifCache = ReadBoolean(root, "UseExifCache", true),
                     ReadExifInformation = ReadBoolean(root, "ReadExifInformation", false),
+                    ShowImagePreview = ReadBoolean(root, "ShowImagePreview", false),
                     CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot"))
                 };
 
@@ -135,6 +138,7 @@ namespace PhotoImporter.Core.Settings
                         new XElement("AnalyzeJpegOnlyForRawJpegPair", settings.AnalyzeJpegOnlyForRawJpegPair),
                         new XElement("UseExifCache", settings.UseExifCache),
                         new XElement("ReadExifInformation", settings.ReadExifInformation),
+                        new XElement("ShowImagePreview", settings.ShowImagePreview),
                         new XElement("CustomExifCacheRoot", settings.CustomExifCacheRoot ?? string.Empty),
                         new XElement("PreviousExifCacheRoots",
                             settings.PreviousExifCacheRoots

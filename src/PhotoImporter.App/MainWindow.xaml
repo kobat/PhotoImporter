@@ -107,9 +107,6 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Text="写真の取り込みプレビュー"
-                   FontSize="24" FontWeight="SemiBold" Margin="0,0,0,18" />
-
         <Grid Grid.Row="1" Margin="0,0,0,10" IsEnabled="{Binding CanEditSettings}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="112" />
@@ -579,8 +576,39 @@
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1" CornerRadius="4" Padding="12">
             <DockPanel>
-                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <TextBlock Text="トークン詳細" FontSize="18" FontWeight="SemiBold" />
+                    <CheckBox Grid.Column="1" Content="画像プレビューを表示"
+                              IsChecked="{Binding ShowImagePreview, Mode=TwoWay}"
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="選択した画像のプレビューを表示" />
+                </Grid>
+                <Border DockPanel.Dock="Top" Height="180" Margin="0,0,0,10"
+                        Visibility="{Binding ImagePreviewVisibility}"
+                        BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                        Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        BorderThickness="1" CornerRadius="3">
+                    <Grid ClipToBounds="True">
+                        <Image Source="{Binding ImagePreviewSource, Mode=OneWay}"
+                               Margin="8" Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               AutomationProperties.Name="選択した画像のプレビュー" />
+                        <Border Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                                Visibility="{Binding ImagePreviewPlaceholderVisibility}">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Margin="18">
+                                <TextBlock Text="{Binding ImagePreviewStatus}"
+                                           TextAlignment="Center" TextWrapping="Wrap"
+                                           Foreground="DimGray" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                     <TextBlock Text="{Binding SelectedSourcePath}" Margin="0,4,0,0"
                                TextWrapping="Wrap" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding ExifReadStatus}" Margin="0,3,0,0"

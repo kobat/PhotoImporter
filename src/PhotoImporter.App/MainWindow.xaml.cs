@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
@@ -46,6 +47,13 @@ namespace PhotoImporter.App
         private CancellationTokenSource _copyCancellation;
         private CancellationTokenSource _scanCancellation;
         private PreviewItem _selectedPreviewItem;
+        private bool _showImagePreview;
+        private BitmapSource _imagePreviewSource;
+        private string _imagePreviewStatus = "一覧から画像を選択してください。";
+        private CancellationTokenSource _imagePreviewCancellation;
+        private int _imagePreviewRequestVersion;
+        private readonly ImagePreviewLoader _imagePreviewLoader = new ImagePreviewLoader();
+        private readonly SemaphoreSlim _imagePreviewLoadGate = new SemaphoreSlim(1, 1);
         private bool _isUpdatingSelection;
         private PreviewItemCollectionState _itemCollectionState;
         private PreparedFilter _appliedFilter;
@@ -100,7 +108,12 @@ namespace PhotoImporter.App
         public string SourceFolder
         {
             get => _sourceFolder;
-            set { if (Set(ref _sourceFolder, value)) SettingsChanged(); }
+            set
+            {
+                if (!Set(ref _sourceFolder, value)) return;
+                ResetImagePreviewForSourceChange();
+                SettingsChanged();
+            }
         }
 
         public string DestinationFolder
@@ -149,6 +162,26 @@ namespace PhotoImporter.App
             }
         }
 
+        public bool ShowImagePreview
+        {
+            get => _showImagePreview;
+            set
+            {
+                if (!Set(ref _showImagePreview, value)) return;
+                OnPropertyChanged(nameof(ImagePreviewVisibility));
+                QueueImagePreview(SelectedPreviewItem);
+            }
+        }
+
+        public BitmapSource ImagePreviewSource => _imagePreviewSource;
+        public string ImagePreviewStatus => _imagePreviewStatus;
+        public Visibility ImagePreviewVisibility => ShowImagePreview
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        public Visibility ImagePreviewPlaceholderVisibility => _imagePreviewSource == null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         public PreviewItem SelectedPreviewItem
         {
             get => _selectedPreviewItem;
@@ -159,6 +192,7 @@ namespace PhotoImporter.App
                 foreach (var item in ExifTokenDetails) item.SetPreviewItem(value);
                 OnPropertyChanged(nameof(SelectedSourcePath));
                 OnPropertyChanged(nameof(ExifReadStatus));
+                QueueImagePreview(value);
             }
         }
 
@@ -335,6 +369,132 @@ namespace PhotoImporter.App
             if (e.Key != Key.Escape || _activeOverlay == OverlayPanel.None) return;
             CloseOverlay(true);
             e.Handled = true;
+        }
+
+        private void QueueImagePreview(PreviewItem item)
+        {
+            CancelImagePreviewRequest();
+            SetImagePreviewState(null, string.Empty);
+            if (!ShowImagePreview) return;
+            if (item == null)
+            {
+                SetImagePreviewState(null, "一覧から画像を選択してください。");
+                return;
+            }
+            if (item.IsScanError)
+            {
+                SetImagePreviewState(null, "スキャンエラーの項目はプレビューできません。");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(SourceFolder))
+            {
+                SetImagePreviewState(null, "コピー元フォルダーを指定してください。");
+                return;
+            }
+
+            string previewPath;
+            try
+            {
+                var sourceRoot = Path.GetFullPath(SourceFolder);
+                previewPath = Path.GetFullPath(Path.Combine(sourceRoot, item.ImagePreviewSourcePath));
+                if (!IsSameOrUnder(previewPath, sourceRoot))
+                    throw new InvalidOperationException("コピー元フォルダー外の画像はプレビューできません。");
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                       ex is ArgumentException || ex is NotSupportedException ||
+                                       ex is InvalidOperationException)
+            {
+                SetImagePreviewState(null, "プレビュー元を確認できません: " + ex.Message);
+                return;
+            }
+
+            var requestVersion = _imagePreviewRequestVersion;
+            var cancellation = new CancellationTokenSource();
+            _imagePreviewCancellation = cancellation;
+            SetImagePreviewState(null, "読込中...");
+            _ = LoadImagePreviewAsync(
+                item,
+                previewPath,
+                PhotoFileClassifier.Classify(item.SourcePath),
+                requestVersion,
+                cancellation);
+        }
+
+        private async Task LoadImagePreviewAsync(
+            PreviewItem item,
+            string previewPath,
+            PhotoFileType originalFileType,
+            int requestVersion,
+            CancellationTokenSource cancellation)
+        {
+            var gateEntered = false;
+            try
+            {
+                await Task.Delay(200, cancellation.Token);
+                await _imagePreviewLoadGate.WaitAsync(cancellation.Token);
+                gateEntered = true;
+                if (!IsCurrentImagePreviewRequest(item, requestVersion)) return;
+
+                var token = cancellation.Token;
+                var result = await Task.Run(() => _imagePreviewLoader.Load(
+                    previewPath,
+                    originalFileType,
+                    ImagePreviewLoader.DefaultMaximumWidth,
+                    ImagePreviewLoader.DefaultMaximumHeight,
+                    token), token);
+                if (!IsCurrentImagePreviewRequest(item, requestVersion)) return;
+
+                SetImagePreviewState(
+                    result.Image,
+                    result.IsSuccess ? string.Empty : result.Message);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                if (IsCurrentImagePreviewRequest(item, requestVersion))
+                    SetImagePreviewState(null, "画像プレビューを読み込めません: " + ex.Message);
+            }
+            finally
+            {
+                if (gateEntered) _imagePreviewLoadGate.Release();
+                if (ReferenceEquals(_imagePreviewCancellation, cancellation))
+                    _imagePreviewCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+
+        private bool IsCurrentImagePreviewRequest(PreviewItem item, int requestVersion) =>
+            ShowImagePreview &&
+            requestVersion == _imagePreviewRequestVersion &&
+            ReferenceEquals(SelectedPreviewItem, item);
+
+        private void CancelImagePreviewRequest()
+        {
+            unchecked { _imagePreviewRequestVersion++; }
+            var cancellation = _imagePreviewCancellation;
+            _imagePreviewCancellation = null;
+            cancellation?.Cancel();
+        }
+
+        private void ResetImagePreviewForSourceChange()
+        {
+            CancelImagePreviewRequest();
+            SetImagePreviewState(
+                null,
+                ShowImagePreview
+                    ? "コピー元が変更されました。再スキャンして画像を選択してください。"
+                    : string.Empty);
+        }
+
+        private void SetImagePreviewState(BitmapSource source, string status)
+        {
+            _imagePreviewSource = source;
+            _imagePreviewStatus = status ?? string.Empty;
+            OnPropertyChanged(nameof(ImagePreviewSource));
+            OnPropertyChanged(nameof(ImagePreviewStatus));
+            OnPropertyChanged(nameof(ImagePreviewPlaceholderVisibility));
         }
 
         private async void Scan_Click(object sender, RoutedEventArgs e)
@@ -701,6 +861,9 @@ namespace PhotoImporter.App
             var files = scan.Files.OrderBy(
                 item => MakeRelative(sourceRoot, item), StringComparer.OrdinalIgnoreCase).ToList();
             cancellationToken.ThrowIfCancellationRequested();
+            var imagePreviewPlan = RawJpegAnalysisPlan.Create(
+                files,
+                RawJpegAnalysisMode.JpegOnlyForPair);
             RawJpegAnalysisPlan analysisPlan = null;
             var metadataBySource = new Dictionary<string, PhotoMetadataReadResult>(StringComparer.OrdinalIgnoreCase);
             if (template.RequiresExif || readExifInformation)
@@ -747,6 +910,7 @@ namespace PhotoImporter.App
                     var info = new FileInfo(path);
                     var sourcePath = MakeRelative(sourceRoot, path);
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+                    var imagePreviewSource = imagePreviewPlan.GetAnalysisSource(path);
                     var analysisSource = analysisPlan == null ? path : analysisPlan.GetAnalysisSource(path);
                     var metadataResult = analysisPlan == null ? null : metadataBySource[analysisSource];
                     if (template.RequiresExif && metadataResult != null &&
@@ -788,7 +952,8 @@ namespace PhotoImporter.App
                         context,
                         metadataResult,
                         analysisPlan == null ? null : MakeRelative(sourceRoot, analysisSource),
-                        allocation.SequenceNumber));
+                        allocation.SequenceNumber,
+                        MakeRelative(sourceRoot, imagePreviewSource)));
                 }
                 catch (UnauthorizedAccessException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
                 catch (IOException ex) { result.Add(PreviewItem.ForScanError(MakeRelative(sourceRoot, path), ex.Message)); }
@@ -1189,6 +1354,7 @@ namespace PhotoImporter.App
             _analyzeJpegOnlyForRawJpegPair = settings.AnalyzeJpegOnlyForRawJpegPair;
             _useExifCache = settings.UseExifCache;
             _readExifInformation = settings.ReadExifInformation;
+            _showImagePreview = settings.ShowImagePreview;
             _customExifCacheRoot = settings.CustomExifCacheRoot;
             _previousExifCacheRoots.Clear();
             _previousExifCacheRoots.AddRange(settings.PreviousExifCacheRoots);
@@ -1198,6 +1364,7 @@ namespace PhotoImporter.App
 
         private void MainWindow_Closing(object sender, CancelEventArgs e)
         {
+            CancelImagePreviewRequest();
             var settings = new PhotoImporterSettings
             {
                 SourceFolder = SourceFolder,
@@ -1207,6 +1374,7 @@ namespace PhotoImporter.App
                 AnalyzeJpegOnlyForRawJpegPair = AnalyzeJpegOnlyForRawJpegPair,
                 UseExifCache = UseExifCache,
                 ReadExifInformation = ReadExifInformation,
+                ShowImagePreview = ShowImagePreview,
                 CustomExifCacheRoot = _customExifCacheRoot
             };
             foreach (var path in _previousExifCacheRoots) settings.PreviousExifCacheRoots.Add(path);
@@ -1577,7 +1745,8 @@ namespace PhotoImporter.App
             FileTemplateContext templateContext = null,
             PhotoMetadataReadResult metadataResult = null,
             string metadataSourcePath = null,
-            int? sequenceNumber = null)
+            int? sequenceNumber = null,
+            string imagePreviewSourcePath = null)
         {
             SourcePath = sourcePath;
             DestinationPath = destinationPath;
@@ -1588,6 +1757,9 @@ namespace PhotoImporter.App
             MetadataResult = metadataResult;
             MetadataSourcePath = metadataSourcePath;
             SequenceNumber = sequenceNumber;
+            ImagePreviewSourcePath = string.IsNullOrWhiteSpace(imagePreviewSourcePath)
+                ? sourcePath
+                : imagePreviewSourcePath;
             _isSelected = CanCopy;
         }
 
@@ -1601,6 +1773,7 @@ namespace PhotoImporter.App
         public PhotoMetadataReadResult MetadataResult { get; private set; }
         public string MetadataSourcePath { get; private set; }
         public int? SequenceNumber { get; }
+        public string ImagePreviewSourcePath { get; }
         public bool CanCopy => CopyPlan != null && !IsScanError && _copyError == null;
         public bool IsScanError { get; private set; }
         public string ErrorMessage { get; private set; }
