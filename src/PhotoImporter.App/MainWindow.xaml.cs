@@ -907,7 +907,7 @@ namespace PhotoImporter.App
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var info = new FileInfo(path);
+                    var sourceSnapshot = PreviewFileSnapshot.CaptureTarget(path);
                     var sourcePath = MakeRelative(sourceRoot, path);
                     var relativeDirectory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
                     var imagePreviewSource = imagePreviewPlan.GetAnalysisSource(path);
@@ -917,28 +917,29 @@ namespace PhotoImporter.App
                         metadataResult.Status == PhotoMetadataReadStatus.ReadError)
                         throw metadataResult.Error;
                     var metadata = metadataResult == null ? PhotoMetadata.Empty : metadataResult.Metadata;
-                    var analysisSourceInfo = string.Equals(path, analysisSource, StringComparison.OrdinalIgnoreCase)
-                        ? info
-                        : new FileInfo(analysisSource);
+                    var analysisSourceSnapshot = PreviewFileSnapshot.CaptureAnalysisSource(
+                        sourceSnapshot,
+                        path,
+                        analysisSource);
                     var context = new FileTemplateContext(
-                            info.Name,
-                            info.LastWriteTime,
-                            info.Length,
+                            sourceSnapshot.Name,
+                            sourceSnapshot.LastWriteTime,
+                            sourceSnapshot.Length,
                             relativeDirectory,
                             metadata,
-                            info.LastWriteTimeUtc,
-                            analysisSourceInfo.LastWriteTime,
-                            analysisSourceInfo.LastWriteTimeUtc,
-                            (info.Attributes & FileAttributes.ReadOnly) != 0);
-                    var allocation = allocator.Allocate(context, info.LastWriteTimeUtc);
+                            sourceSnapshot.LastWriteTimeUtc,
+                            analysisSourceSnapshot.LastWriteTime,
+                            analysisSourceSnapshot.LastWriteTimeUtc,
+                            (sourceSnapshot.Attributes & FileAttributes.ReadOnly) != 0);
+                    var allocation = allocator.Allocate(context, sourceSnapshot.LastWriteTimeUtc);
                     var destinationPath = Path.Combine(destinationRoot, allocation.RelativePath);
                     var plan = allocation.Status == DestinationStatus.NotImported ||
                                allocation.Status == DestinationStatus.Overwrite
                         ? new CopyPlanItem(
-                            info.FullName,
+                            sourceSnapshot.FullName,
                             destinationRoot,
                             destinationPath,
-                            new FileSnapshot(info.Length, info.LastWriteTimeUtc),
+                            new FileSnapshot(sourceSnapshot.Length, sourceSnapshot.LastWriteTimeUtc),
                             allocation.DestinationSnapshot,
                             destinationTimestampPolicy,
                             allocation.Status == DestinationStatus.Overwrite)
