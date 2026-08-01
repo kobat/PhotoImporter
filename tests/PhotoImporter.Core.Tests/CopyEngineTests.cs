@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using PhotoImporter.Core.Copying;
 using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Templates;
@@ -71,6 +72,98 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(CopyItemStatus.Cancelled, Assert.Single(result.Items).Status);
             Assert.False(File.Exists(destination));
             Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(destination), "PI_*.partial"));
+        }
+
+        [Fact]
+        public async Task PauseRequestAfterFileWaitsBeforeStartingNextFile()
+        {
+            var firstSource = CreateFile("pause-first.jpg", new byte[] { 1, 2, 3 });
+            var secondSource = CreateFile("pause-second.jpg", new byte[] { 4, 5, 6 });
+            var firstDestination = Path.Combine(_root, "out", "pause-first.jpg");
+            var secondDestination = Path.Combine(_root, "out", "pause-second.jpg");
+            var completedCopies = 0;
+            var controller = new CopyPauseController(TimeSpan.FromSeconds(3));
+            var engine = new CopyEngine(new ManagedCopyOperation(() =>
+            {
+                if (Interlocked.Increment(ref completedCopies) == 1)
+                    controller.RequestPause();
+            }));
+            var execution = Task.Run(() => engine.Execute(
+                new[]
+                {
+                    CreatePlan(firstSource, firstDestination, null, false),
+                    CreatePlan(secondSource, secondDestination, null, false)
+                },
+                _root,
+                null,
+                CancellationToken.None,
+                controller));
+
+            try
+            {
+                Assert.True(SpinWait.SpinUntil(
+                    () => controller.State == CopyPauseState.PausedBetweenFiles,
+                    TimeSpan.FromSeconds(5)));
+                Assert.Equal(1, Volatile.Read(ref completedCopies));
+                Assert.True(File.Exists(firstDestination));
+                Assert.False(File.Exists(secondDestination));
+
+                Assert.True(controller.Resume());
+                Assert.Same(execution, await Task.WhenAny(execution, Task.Delay(TimeSpan.FromSeconds(5))));
+                var result = await execution;
+                Assert.Equal(2, result.Items.Count(item => item.Status == CopyItemStatus.Copied));
+                Assert.True(File.Exists(secondDestination));
+            }
+            finally
+            {
+                if (controller.IsPauseRequested) controller.Resume();
+                if (!execution.IsCompleted)
+                    await Task.WhenAny(execution, Task.Delay(TimeSpan.FromSeconds(5)));
+                controller.Dispose();
+            }
+        }
+
+        [Fact]
+        public async Task NativeCopyResumesPausedPartialFile()
+        {
+            var content = new byte[32 * 1024 * 1024];
+            for (var index = 0; index < content.Length; index += 4096)
+                content[index] = (byte)(index / 4096);
+            var source = CreateFile("native-pause-source.bin", content);
+            var partial = Path.Combine(_root, "out", "native-pause.partial");
+            Directory.CreateDirectory(Path.GetDirectoryName(partial));
+            var pauseRequested = 0;
+            var controller = new CopyPauseController(TimeSpan.Zero);
+            var copy = Task.Run(() => new CopyFile2Native().Copy(
+                source,
+                partial,
+                CancellationToken.None,
+                controller,
+                transferred =>
+                {
+                    if (Interlocked.Exchange(ref pauseRequested, 1) == 0)
+                        controller.RequestPause();
+                }));
+
+            try
+            {
+                Assert.True(SpinWait.SpinUntil(
+                    () => controller.State == CopyPauseState.PausedWithinFile,
+                    TimeSpan.FromSeconds(10)));
+                Assert.False(copy.IsCompleted);
+
+                Assert.True(controller.Resume());
+                Assert.Same(copy, await Task.WhenAny(copy, Task.Delay(TimeSpan.FromSeconds(10))));
+                await copy;
+                Assert.Equal(content, File.ReadAllBytes(partial));
+            }
+            finally
+            {
+                if (controller.IsPauseRequested) controller.Resume();
+                if (!copy.IsCompleted)
+                    await Task.WhenAny(copy, Task.Delay(TimeSpan.FromSeconds(10)));
+                controller.Dispose();
+            }
         }
 
         [Fact]
@@ -477,6 +570,7 @@ namespace PhotoImporter.Core.Tests
                 string sourcePath,
                 string destinationPath,
                 CancellationToken cancellationToken,
+                CopyPauseController pauseController,
                 Action<long> progress)
             {
                 var source = new FileInfo(sourcePath);

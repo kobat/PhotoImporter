@@ -49,7 +49,7 @@ namespace PhotoImporter.Core.Copying
             IProgress<CopyProgress> progress,
             CancellationToken cancellationToken)
         {
-            return Execute(plan, null, progress, cancellationToken);
+            return Execute(plan, null, progress, cancellationToken, null);
         }
 
         public CopyBatchResult Execute(
@@ -57,6 +57,16 @@ namespace PhotoImporter.Core.Copying
             string sourceRoot,
             IProgress<CopyProgress> progress,
             CancellationToken cancellationToken)
+        {
+            return Execute(plan, sourceRoot, progress, cancellationToken, null);
+        }
+
+        public CopyBatchResult Execute(
+            IEnumerable<CopyPlanItem> plan,
+            string sourceRoot,
+            IProgress<CopyProgress> progress,
+            CancellationToken cancellationToken,
+            CopyPauseController pauseController)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             var items = plan.ToList();
@@ -71,6 +81,17 @@ namespace PhotoImporter.Core.Copying
             for (var index = 0; index < items.Count; index++)
             {
                 if (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled = true;
+                    break;
+                }
+
+                try
+                {
+                    if (pauseController != null)
+                        pauseController.WaitAtFileBoundary(cancellationToken);
+                }
+                catch (OperationCanceledException)
                 {
                     cancelled = true;
                     break;
@@ -99,9 +120,10 @@ namespace PhotoImporter.Core.Copying
                 var currentTransferred = 0L;
                 try
                 {
-                    ExecuteOne(item, cancellationToken, transferred =>
+                    ExecuteOne(item, cancellationToken, pauseController, transferred =>
                     {
-                        currentTransferred = Math.Min(item.SourceSnapshot.FileSize, Math.Max(0, transferred));
+                        var reported = Math.Min(item.SourceSnapshot.FileSize, Math.Max(0, transferred));
+                        currentTransferred = Math.Max(currentTransferred, reported);
                         Report(progress, index, items.Count, completedBytes + currentTransferred, totalBytes, item.SourcePath);
                     });
                     completedBytes += item.SourceSnapshot.FileSize;
@@ -151,7 +173,11 @@ namespace PhotoImporter.Core.Copying
             return null;
         }
 
-        private void ExecuteOne(CopyPlanItem item, CancellationToken token, Action<long> progress)
+        private void ExecuteOne(
+            CopyPlanItem item,
+            CancellationToken token,
+            CopyPauseController pauseController,
+            Action<long> progress)
         {
             ValidateSourceSnapshot(item.SourcePath, item.SourceSnapshot, "コピー元");
             ValidateDestination(item);
@@ -169,7 +195,7 @@ namespace PhotoImporter.Core.Copying
             {
                 try
                 {
-                    _copyFile.Copy(item.SourcePath, partialPath, token, progress);
+                    _copyFile.Copy(item.SourcePath, partialPath, token, pauseController, progress);
                 }
                 catch (COMException) when (token.IsCancellationRequested)
                 {

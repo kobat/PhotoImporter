@@ -11,12 +11,17 @@ namespace PhotoImporter.Core.Copying
             string sourcePath,
             string destinationPath,
             CancellationToken cancellationToken,
+            CopyPauseController pauseController,
             Action<long> progress);
     }
 
     internal sealed class CopyFile2Native : ICopyFileOperation
     {
         private const uint CopyFileFailIfExists = 0x00000001;
+        private const uint CopyFileResumeFromPause = 0x00004000;
+        private const int ErrorRequestPaused = 3050;
+        private static readonly int HResultRequestPaused =
+            unchecked((int)(0x80070000u | ErrorRequestPaused));
         private const int CallbackChunkFinished = 2;
         private const int CallbackStreamFinished = 4;
 
@@ -24,9 +29,10 @@ namespace PhotoImporter.Core.Copying
             string sourcePath,
             string destinationPath,
             CancellationToken cancellationToken,
+            CopyPauseController pauseController,
             Action<long> progress)
         {
-            var context = new CallbackContext(cancellationToken, progress);
+            var context = new CallbackContext(cancellationToken, pauseController, progress);
             var contextHandle = GCHandle.Alloc(context);
             var cancelPointer = Marshal.AllocHGlobal(sizeof(int));
             Marshal.WriteInt32(cancelPointer, 0);
@@ -45,14 +51,31 @@ namespace PhotoImporter.Core.Copying
                         CallbackContext = GCHandle.ToIntPtr(contextHandle)
                     };
 
-                    var hresult = CopyFile2(sourcePath, destinationPath, ref parameters);
-                    GC.KeepAlive(callback);
-                    if (context.FlushError != 0)
-                        throw new Win32Exception(context.FlushError, "FlushFileBuffers failed.");
-                    if (context.CallbackError != 0)
-                        throw new InvalidOperationException("The CopyFile2 progress callback failed.");
-                    if (hresult < 0)
-                        Marshal.ThrowExceptionForHR(hresult);
+                    var resumeFromPause = false;
+                    while (true)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        parameters.CopyFlags = CopyFileFailIfExists |
+                            (resumeFromPause ? CopyFileResumeFromPause : 0u);
+
+                        var hresult = CopyFile2(sourcePath, destinationPath, ref parameters);
+                        GC.KeepAlive(callback);
+                        if (context.FlushError != 0)
+                            throw new Win32Exception(context.FlushError, "FlushFileBuffers failed.");
+                        if (context.CallbackError != 0)
+                            throw new InvalidOperationException("The CopyFile2 progress callback failed.");
+
+                        if (hresult == HResultRequestPaused && pauseController != null)
+                        {
+                            pauseController.WaitAfterNativePause(cancellationToken);
+                            resumeFromPause = true;
+                            continue;
+                        }
+
+                        if (hresult < 0)
+                            Marshal.ThrowExceptionForHR(hresult);
+                        break;
+                    }
                 }
             }
             finally
@@ -94,9 +117,11 @@ namespace PhotoImporter.Core.Copying
                     }
                 }
 
-                return context.CancellationToken.IsCancellationRequested
-                    ? CopyFile2MessageAction.Cancel
-                    : CopyFile2MessageAction.Continue;
+                if (context.CancellationToken.IsCancellationRequested)
+                    return CopyFile2MessageAction.Cancel;
+                if (context.PauseController != null && context.PauseController.ShouldPauseCurrentFile())
+                    return CopyFile2MessageAction.Pause;
+                return CopyFile2MessageAction.Continue;
             }
             catch
             {
@@ -107,13 +132,18 @@ namespace PhotoImporter.Core.Copying
 
         private sealed class CallbackContext
         {
-            internal CallbackContext(CancellationToken cancellationToken, Action<long> progress)
+            internal CallbackContext(
+                CancellationToken cancellationToken,
+                CopyPauseController pauseController,
+                Action<long> progress)
             {
                 CancellationToken = cancellationToken;
+                PauseController = pauseController;
                 Progress = progress;
             }
 
             internal readonly CancellationToken CancellationToken;
+            internal readonly CopyPauseController PauseController;
             internal readonly Action<long> Progress;
             internal int FlushError;
             internal int CallbackError;
@@ -127,7 +157,8 @@ namespace PhotoImporter.Core.Copying
         private enum CopyFile2MessageAction
         {
             Continue = 0,
-            Cancel = 1
+            Cancel = 1,
+            Pause = 4
         }
 
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]

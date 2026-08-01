@@ -33,6 +33,7 @@ namespace PhotoImporter.App
         private Brush _messageBrush = Brushes.DimGray;
         private bool _isBusy;
         private bool _isCopying;
+        private bool _isCancellingCopy;
         private bool _isScanningExif;
         private bool _overwriteExisting;
         private SourceFileSelectionMode _sourceFileSelectionMode = SourceFileSelectionMode.MediaOnly;
@@ -59,6 +60,8 @@ namespace PhotoImporter.App
         private double _progressPercent;
         private int _exifCacheHits;
         private CancellationTokenSource _copyCancellation;
+        private CopyPauseController _copyPauseController;
+        private CopyPauseState _copyPauseState = CopyPauseState.Running;
         private CancellationTokenSource _scanCancellation;
         private PreviewItem _selectedPreviewItem;
         private bool _showImagePreview;
@@ -336,12 +339,14 @@ namespace PhotoImporter.App
         public bool CanSelectItems => !_isBusy;
         public bool CanSelectAll => !_isBusy && _itemCollectionState.VisibleItems.Any(item => item.CanCopy);
         public bool? SelectAllState => _itemCollectionState.GetVisibleSelectAllState();
-        public bool CanCancel => _isCopying || _isScanningExif;
+        public bool CanCancel => (_isCopying && !_isCancellingCopy) || _isScanningExif;
         public bool CanScan => !_isBusy && !string.IsNullOrWhiteSpace(SourceFolder) &&
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
                                !string.IsNullOrWhiteSpace(TemplateText) &&
                                string.IsNullOrEmpty(SidecarExtensionsError);
-        public bool CanCopy => !_isBusy && _previewIsCurrent && _itemCollectionState.CopyTargets.Any();
+        public bool CanCopy => _isCopying
+            ? !_isCancellingCopy
+            : !_isBusy && _previewIsCurrent && _itemCollectionState.CopyTargets.Any();
         public bool CanEditFilters => !_isBusy && _previewIsCurrent;
         public bool CanApplyFilter => CanEditFilters && FilterConditions.All(item => item.IsValid);
         public PhotoImporterPreset SelectedPreset
@@ -465,7 +470,17 @@ namespace PhotoImporter.App
         public Visibility ManagedPresetWarningVisibility => string.IsNullOrEmpty(ManagedPresetWarning)
             ? Visibility.Collapsed
             : Visibility.Visible;
-        public string CopyButtonText => string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
+        public string CopyButtonText
+        {
+            get
+            {
+                if (_isCopying)
+                    return _copyPauseController != null && _copyPauseController.IsPauseRequested
+                        ? "再開"
+                        : "一時停止";
+                return string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
+            }
+        }
         public string ViewSelectionSummary
         {
             get
@@ -780,11 +795,25 @@ namespace PhotoImporter.App
 
         private async void Copy_Click(object sender, RoutedEventArgs e)
         {
+            if (_isCopying)
+            {
+                ToggleCopyPause();
+                return;
+            }
+
             var selected = _itemCollectionState.CopyTargets.ToList();
             if (selected.Count == 0) return;
             var selectionBeforeCopy = PreviewSelectionState.Capture(Items);
 
-            _copyCancellation = new CancellationTokenSource();
+            var copyCancellation = new CancellationTokenSource();
+            CopyPauseController pauseController = null;
+            var pauseProgress = new Progress<CopyPauseState>(state =>
+                UpdateCopyPauseState(pauseController));
+            pauseController = new CopyPauseController(TimeSpan.FromSeconds(3), pauseProgress);
+            _copyCancellation = copyCancellation;
+            _copyPauseController = pauseController;
+            _copyPauseState = CopyPauseState.Running;
+            _isCancellingCopy = false;
             SetBusy(true, true);
             SetMessage("コピーしています...", Brushes.DimGray);
             ProgressPercent = 0;
@@ -799,7 +828,8 @@ namespace PhotoImporter.App
                         .Select(item => item.CopyPlan),
                     Path.GetFullPath(SourceFolder),
                     progress,
-                    _copyCancellation.Token));
+                    copyCancellation.Token,
+                    pauseController));
             }
             catch (Exception ex)
             {
@@ -807,8 +837,12 @@ namespace PhotoImporter.App
             }
             finally
             {
-                _copyCancellation.Dispose();
-                _copyCancellation = null;
+                if (ReferenceEquals(_copyCancellation, copyCancellation)) _copyCancellation = null;
+                if (ReferenceEquals(_copyPauseController, pauseController)) _copyPauseController = null;
+                copyCancellation.Dispose();
+                pauseController.Dispose();
+                _copyPauseState = CopyPauseState.Running;
+                _isCancellingCopy = false;
                 SetBusy(false, false);
             }
 
@@ -959,11 +993,60 @@ namespace PhotoImporter.App
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
+            if (_isCopying)
+            {
+                _isCancellingCopy = true;
+                OnPropertyChanged(nameof(CanCopy));
+                OnPropertyChanged(nameof(CanCancel));
+                OnPropertyChanged(nameof(CopyButtonText));
+            }
             _scanCancellation?.Cancel();
             _copyCancellation?.Cancel();
             SetMessage(_isScanningExif
                 ? "Exifスキャンを停止しています。現在のファイルを完了してキャッシュを保存します..."
                 : "キャンセルしています...", Brushes.DimGray);
+        }
+
+        private void ToggleCopyPause()
+        {
+            var controller = _copyPauseController;
+            if (controller == null || _isCancellingCopy) return;
+
+            if (controller.IsPauseRequested)
+                controller.Resume();
+            else
+                controller.RequestPause();
+
+            UpdateCopyPauseState(controller);
+        }
+
+        private void UpdateCopyPauseState(CopyPauseController controller)
+        {
+            if (!ReferenceEquals(_copyPauseController, controller)) return;
+
+            var previousState = _copyPauseState;
+            _copyPauseState = controller.State;
+            OnPropertyChanged(nameof(CanCopy));
+            OnPropertyChanged(nameof(CopyButtonText));
+            if (_isCancellingCopy) return;
+
+            switch (_copyPauseState)
+            {
+                case CopyPauseState.PausePending:
+                    SetMessage("現在のファイル完了後に一時停止します...", Brushes.DimGray);
+                    break;
+                case CopyPauseState.NativePauseRequested:
+                    SetMessage("3秒経過したため、現在のファイルを一時停止しています...", Brushes.DimGray);
+                    break;
+                case CopyPauseState.PausedBetweenFiles:
+                case CopyPauseState.PausedWithinFile:
+                    SetMessage("コピーを一時停止しました。", Brushes.DimGray);
+                    break;
+                case CopyPauseState.Running:
+                    if (previousState != CopyPauseState.Running)
+                        SetMessage("コピーを再開しました...", Brushes.DimGray);
+                    break;
+            }
         }
 
         private void SelectAll_Click(object sender, RoutedEventArgs e)
@@ -2501,6 +2584,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(CanCancel));
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
+            OnPropertyChanged(nameof(CopyButtonText));
             OnPropertyChanged(nameof(ProgressVisibility));
             OnPropertyChanged(nameof(CanEditFilters));
             OnPropertyChanged(nameof(CanApplyFilter));
