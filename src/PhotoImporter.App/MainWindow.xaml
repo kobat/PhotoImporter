@@ -175,8 +175,22 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="コピー元" VerticalAlignment="Center" />
-            <TextBox Grid.Column="1" Text="{Binding SourceFolder, UpdateSourceTrigger=PropertyChanged}"
-                     Margin="0,0,8,0" ToolTip="写真があるフォルダー" />
+            <ComboBox Grid.Column="1"
+                      IsEditable="True" IsTextSearchEnabled="False"
+                      Text="{Binding SourceFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      ItemsSource="{Binding SourceFolderHistory}"
+                      Margin="0,0,8,0" MaxDropDownHeight="300"
+                      ToolTip="写真があるフォルダー"
+                      PreviewMouseWheel="HistoryComboBox_PreviewMouseWheel"
+                      AutomationProperties.AutomationId="SourceFolderInput"
+                      AutomationProperties.Name="コピー元フォルダー">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" ToolTip="{Binding}"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="720" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
             <Button Grid.Column="2" Content="選択..." Click="SelectSource_Click" />
         </Grid>
 
@@ -187,8 +201,22 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="コピー先" VerticalAlignment="Center" />
-            <TextBox Grid.Column="1" Text="{Binding DestinationFolder, UpdateSourceTrigger=PropertyChanged}"
-                     Margin="0,0,8,0" ToolTip="取り込み先のフォルダー" />
+            <ComboBox Grid.Column="1"
+                      IsEditable="True" IsTextSearchEnabled="False"
+                      Text="{Binding DestinationFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      ItemsSource="{Binding DestinationFolderHistory}"
+                      Margin="0,0,8,0" MaxDropDownHeight="300"
+                      ToolTip="取り込み先のフォルダー"
+                      PreviewMouseWheel="HistoryComboBox_PreviewMouseWheel"
+                      AutomationProperties.AutomationId="DestinationFolderInput"
+                      AutomationProperties.Name="コピー先フォルダー">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" ToolTip="{Binding}"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="720" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
             <Button Grid.Column="2" Content="選択..." Click="SelectDestination_Click" />
         </Grid>
 
@@ -199,9 +227,23 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="テンプレート" VerticalAlignment="Center" />
-            <TextBox Grid.Column="1" Text="{Binding TemplateText, UpdateSourceTrigger=PropertyChanged}"
-                     IsEnabled="{Binding CanEditSettings}" Margin="0,0,8,0"
-                     ToolTip="例: {ModifiedDate:yyyy-MM-dd}\{FileName}{Sequence}{Extension}" />
+            <ComboBox Grid.Column="1"
+                      IsEditable="True" IsTextSearchEnabled="False"
+                      Text="{Binding TemplateText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      ItemsSource="{Binding TemplateHistory}"
+                      IsEnabled="{Binding CanEditSettings}"
+                      Margin="0,0,8,0" MaxDropDownHeight="300"
+                      ToolTip="例: {ModifiedDate:yyyy-MM-dd}\{FileName}{Sequence}{Extension}"
+                      PreviewMouseWheel="HistoryComboBox_PreviewMouseWheel"
+                      AutomationProperties.AutomationId="TemplateInput"
+                      AutomationProperties.Name="テンプレート">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" ToolTip="{Binding}"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="720" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
             <Button Grid.Column="2" Content="スキャン" MinWidth="100"
                     IsDefault="True" IsEnabled="{Binding CanScan}" Click="Scan_Click" />
         </Grid>

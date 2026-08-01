@@ -12,6 +12,8 @@ namespace PhotoImporter.Core.Settings
     public sealed class PhotoImporterSettings
     {
         public const string DefaultTemplate = @"{ModifiedDate:yyyy-MM-dd}\{FileName}{Sequence}{Extension}";
+        public const int DefaultInputHistoryLimit = 10;
+        public const int MaximumInputHistoryLimit = 100;
 
         public PhotoImporterSettings()
         {
@@ -22,6 +24,7 @@ namespace PhotoImporter.Core.Settings
             UseExifCache = true;
             ReadExifInformation = false;
             ShowImagePreview = false;
+            InputHistoryLimit = DefaultInputHistoryLimit;
             SidecarExtensions = new List<string> { ".xmp" };
             PreviousExifCacheRoots = new List<string>();
         }
@@ -36,6 +39,7 @@ namespace PhotoImporter.Core.Settings
         public bool UseExifCache { get; set; }
         public bool ReadExifInformation { get; set; }
         public bool ShowImagePreview { get; set; }
+        public int InputHistoryLimit { get; set; }
         public string CustomExifCacheRoot { get; set; }
         public Guid? LastAppliedPresetId { get; set; }
         public IList<string> SidecarExtensions { get; }
@@ -97,6 +101,12 @@ namespace PhotoImporter.Core.Settings
                     UseExifCache = ReadBoolean(root, "UseExifCache", true),
                     ReadExifInformation = ReadBoolean(root, "ReadExifInformation", false),
                     ShowImagePreview = ReadBoolean(root, "ShowImagePreview", false),
+                    InputHistoryLimit = ReadInt32InRange(
+                        root,
+                        "InputHistoryLimit",
+                        PhotoImporterSettings.DefaultInputHistoryLimit,
+                        0,
+                        PhotoImporterSettings.MaximumInputHistoryLimit),
                     CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot")),
                     LastAppliedPresetId = ReadOptionalGuid(root, "LastAppliedPresetId")
                 };
@@ -140,6 +150,14 @@ namespace PhotoImporter.Core.Settings
         public void Save(PhotoImporterSettings settings)
         {
             if (settings == null) throw new ArgumentNullException(nameof(settings));
+            if (settings.InputHistoryLimit < 0 ||
+                settings.InputHistoryLimit > PhotoImporterSettings.MaximumInputHistoryLimit)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(settings.InputHistoryLimit),
+                    string.Format("入力履歴の保存件数は0～{0}件で指定してください。",
+                        PhotoImporterSettings.MaximumInputHistoryLimit));
+            }
             var sidecarPolicy = SidecarPolicy.Create(
                 settings.AssociateSidecars,
                 settings.SidecarExtensions);
@@ -172,6 +190,7 @@ namespace PhotoImporter.Core.Settings
                         new XElement("UseExifCache", settings.UseExifCache),
                         new XElement("ReadExifInformation", settings.ReadExifInformation),
                         new XElement("ShowImagePreview", settings.ShowImagePreview),
+                        new XElement("InputHistoryLimit", settings.InputHistoryLimit),
                         new XElement("LastAppliedPresetId",
                             settings.LastAppliedPresetId.HasValue
                                 ? settings.LastAppliedPresetId.Value.ToString("D")
@@ -220,6 +239,23 @@ namespace PhotoImporter.Core.Settings
             var element = root.Element(name);
             bool value;
             return element != null && bool.TryParse(element.Value, out value) ? value : defaultValue;
+        }
+
+        private static int ReadInt32InRange(
+            XElement root,
+            string name,
+            int defaultValue,
+            int minimum,
+            int maximum)
+        {
+            var element = root.Element(name);
+            int value;
+            return element != null &&
+                   int.TryParse(element.Value, out value) &&
+                   value >= minimum &&
+                   value <= maximum
+                ? value
+                : defaultValue;
         }
 
         private static T ReadEnum<T>(XElement root, string name, T defaultValue)

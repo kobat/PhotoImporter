@@ -25,6 +25,7 @@ namespace PhotoImporter.Core.Tests
             Assert.True(settings.UseExifCache);
             Assert.False(settings.ReadExifInformation);
             Assert.False(settings.ShowImagePreview);
+            Assert.Equal(PhotoImporterSettings.DefaultInputHistoryLimit, settings.InputHistoryLimit);
             Assert.Null(settings.CustomExifCacheRoot);
             Assert.Null(settings.LastAppliedPresetId);
             Assert.Empty(settings.PreviousExifCacheRoots);
@@ -49,6 +50,7 @@ namespace PhotoImporter.Core.Tests
                 UseExifCache = false,
                 ReadExifInformation = true,
                 ShowImagePreview = true,
+                InputHistoryLimit = 24,
                 CustomExifCacheRoot = customCache,
                 LastAppliedPresetId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef")
             };
@@ -72,6 +74,7 @@ namespace PhotoImporter.Core.Tests
             Assert.False(loaded.UseExifCache);
             Assert.True(loaded.ReadExifInformation);
             Assert.True(loaded.ShowImagePreview);
+            Assert.Equal(24, loaded.InputHistoryLimit);
             Assert.Equal(Path.GetFullPath(customCache), loaded.CustomExifCacheRoot);
             Assert.Equal(settings.LastAppliedPresetId, loaded.LastAppliedPresetId);
             Assert.Single(loaded.PreviousExifCacheRoots);
@@ -155,6 +158,26 @@ namespace PhotoImporter.Core.Tests
             var settings = store.Load();
 
             Assert.Equal(SourceFileSelectionMode.MediaOnly, settings.SourceFileSelectionMode);
+        }
+
+        [Theory]
+        [InlineData("-1")]
+        [InlineData("101")]
+        [InlineData("invalid")]
+        public void InvalidInputHistoryLimitUsesDefault(string value)
+        {
+            Directory.CreateDirectory(_root);
+            var settingsPath = Path.Combine(_root, "settings.xml");
+            File.WriteAllText(
+                settingsPath,
+                "<PhotoImporterSettings version=\"1\">" +
+                "<InputHistoryLimit>" + value + "</InputHistoryLimit>" +
+                "</PhotoImporterSettings>");
+            var store = new PhotoImporterSettingsStore(settingsPath);
+
+            var settings = store.Load();
+
+            Assert.Equal(PhotoImporterSettings.DefaultInputHistoryLimit, settings.InputHistoryLimit);
         }
 
         [Fact]

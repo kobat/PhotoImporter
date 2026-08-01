@@ -43,7 +43,9 @@ namespace PhotoImporter.App
         private bool _readExifInformation;
         private string _customExifCacheRoot;
         private readonly List<string> _previousExifCacheRoots = new List<string>();
+        private int _inputHistoryLimit = PhotoImporterSettings.DefaultInputHistoryLimit;
         private readonly PhotoImporterSettingsStore _settingsStore;
+        private readonly RecentInputHistoryStore _inputHistoryStore;
         private readonly PhotoImporterPresetStore _presetStore;
         private Guid? _lastAppliedPresetId;
         private PhotoImporterPreset _selectedPreset;
@@ -90,6 +92,10 @@ namespace PhotoImporter.App
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PhotoImporter",
                 "settings.xml"));
+            _inputHistoryStore = new RecentInputHistoryStore(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PhotoImporter",
+                "history.xml"));
             _presetStore = new PhotoImporterPresetStore(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PhotoImporter",
@@ -108,10 +114,23 @@ namespace PhotoImporter.App
             _itemCollectionState = new PreviewItemCollectionState(Items);
             FilterFieldOptions = FilterFieldOption.CreateAll();
             DataContext = this;
+            string historyWarning = null;
+            try
+            {
+                ApplyInputHistory(_inputHistoryStore.Load());
+            }
+            catch (InvalidDataException ex)
+            {
+                historyWarning = ex.Message + " 入力履歴なしで起動しました。";
+            }
             ReloadPresets(_lastAppliedPresetId, true, true);
             Closing += MainWindow_Closing;
             ContentRendered += MainWindow_ContentRendered;
-            if (settingsWarning != null) SetMessage(settingsWarning, Brushes.DarkGoldenrod);
+            var startupWarnings = new[] { settingsWarning, historyWarning }
+                .Where(item => !string.IsNullOrWhiteSpace(item));
+            var startupWarning = string.Join(" ", startupWarnings);
+            if (!string.IsNullOrEmpty(startupWarning))
+                SetMessage(startupWarning, Brushes.DarkGoldenrod);
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -120,6 +139,9 @@ namespace PhotoImporter.App
         public ObservableCollection<FilterConditionEditor> FilterConditions { get; } = new ObservableCollection<FilterConditionEditor>();
         public ObservableCollection<PhotoImporterPreset> Presets { get; } = new ObservableCollection<PhotoImporterPreset>();
         public ObservableCollection<PhotoImporterPreset> ManagedPresets { get; } = new ObservableCollection<PhotoImporterPreset>();
+        public ObservableCollection<string> SourceFolderHistory { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> DestinationFolderHistory { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> TemplateHistory { get; } = new ObservableCollection<string>();
         public IReadOnlyList<string> PresetManagerSortModes { get; } = new[] { "名前順", "最終利用日順" };
         internal IReadOnlyList<FilterFieldOption> FilterFieldOptions { get; private set; }
         public ICollectionView ItemsView => _itemCollectionState.View;
@@ -650,6 +672,7 @@ namespace PhotoImporter.App
         private async Task<bool> ScanAsync()
         {
             CancellationTokenSource scanCancellation = null;
+            string inputHistoryWarning = null;
             _presetUndo = null;
             NotifyPresetStateChanged();
             SetBusy(true, false);
@@ -684,6 +707,10 @@ namespace PhotoImporter.App
                 var exifCacheRoot = ExifCacheRoot;
                 var shouldReadExif = parseResult.Template.RequiresExif || readExifInformation ||
                                      (_appliedFilter != null && _appliedFilter.RequiresExif);
+                inputHistoryWarning = await RecordInputHistoryAsync(
+                    sourceRoot,
+                    destinationRoot,
+                    TemplateText);
                 IProgress<PhotoMetadataScanProgress> exifProgress = null;
                 if (shouldReadExif)
                 {
@@ -723,6 +750,8 @@ namespace PhotoImporter.App
 
                 _previewIsCurrent = true;
                 UpdateSummary();
+                if (!string.IsNullOrEmpty(inputHistoryWarning))
+                    preview.Warnings.Insert(0, inputHistoryWarning);
                 if (preview.Warnings.Count > 0)
                     SetMessage(string.Join(" ", preview.Warnings), Brushes.DarkGoldenrod);
                 else
@@ -1614,6 +1643,9 @@ namespace PhotoImporter.App
         private void PresetSelector_PreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
             e.Handled = true;
 
+        private void HistoryComboBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
+            e.Handled = true;
+
         private void PresetSelector_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
             if (_suppressPresetSelection) return;
@@ -2331,12 +2363,78 @@ namespace PhotoImporter.App
             _useExifCache = settings.UseExifCache;
             _readExifInformation = settings.ReadExifInformation;
             _showImagePreview = settings.ShowImagePreview;
+            _inputHistoryLimit = settings.InputHistoryLimit;
             _customExifCacheRoot = settings.CustomExifCacheRoot;
             _lastAppliedPresetId = settings.LastAppliedPresetId;
             _previousExifCacheRoots.Clear();
             _previousExifCacheRoots.AddRange(settings.PreviousExifCacheRoots);
             _previousExifCacheRoots.RemoveAll(
                 path => string.Equals(path, ExifCacheRoot, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async Task<string> RecordInputHistoryAsync(
+            string sourceFolder,
+            string destinationFolder,
+            string templateText)
+        {
+            try
+            {
+                var history = await Task.Run(() => _inputHistoryStore.Record(
+                    sourceFolder,
+                    destinationFolder,
+                    templateText,
+                    _inputHistoryLimit));
+                ApplyInputHistory(history);
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                       ex is InvalidDataException || ex is InvalidOperationException ||
+                                       ex is ArgumentException || ex is NotSupportedException ||
+                                       ex is TimeoutException)
+            {
+                return "入力履歴を保存できませんでした: " + ex.Message;
+            }
+        }
+
+        private void ApplyInputHistory(RecentInputHistory history)
+        {
+            SynchronizeCollection(
+                SourceFolderHistory,
+                history.SourceFolders.Take(_inputHistoryLimit),
+                StringComparer.OrdinalIgnoreCase);
+            SynchronizeCollection(
+                DestinationFolderHistory,
+                history.DestinationFolders.Take(_inputHistoryLimit),
+                StringComparer.OrdinalIgnoreCase);
+            SynchronizeCollection(
+                TemplateHistory,
+                history.Templates.Take(_inputHistoryLimit),
+                StringComparer.Ordinal);
+        }
+
+        private static void SynchronizeCollection(
+            ObservableCollection<string> destination,
+            IEnumerable<string> values,
+            StringComparer comparer)
+        {
+            var expected = values.ToList();
+            for (var expectedIndex = 0; expectedIndex < expected.Count; expectedIndex++)
+            {
+                var value = expected[expectedIndex];
+                var existingIndex = -1;
+                for (var index = expectedIndex; index < destination.Count; index++)
+                {
+                    if (!comparer.Equals(destination[index], value)) continue;
+                    existingIndex = index;
+                    break;
+                }
+
+                if (existingIndex < 0) destination.Insert(expectedIndex, value);
+                else if (existingIndex != expectedIndex) destination.Move(existingIndex, expectedIndex);
+            }
+
+            while (destination.Count > expected.Count)
+                destination.RemoveAt(destination.Count - 1);
         }
 
         private void MainWindow_Closing(object sender, CancelEventArgs e)
@@ -2368,6 +2466,7 @@ namespace PhotoImporter.App
                 UseExifCache = UseExifCache,
                 ReadExifInformation = ReadExifInformation,
                 ShowImagePreview = ShowImagePreview,
+                InputHistoryLimit = _inputHistoryLimit,
                 CustomExifCacheRoot = _customExifCacheRoot,
                 LastAppliedPresetId = SelectedPreset?.Id
             };
