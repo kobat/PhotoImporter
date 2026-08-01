@@ -11,6 +11,22 @@
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <DataTemplate x:Key="PresetDetailRowTemplate">
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="PresetDetailLabelColumn" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
+                           MaxWidth="360" TextWrapping="Wrap" VerticalAlignment="Top" />
+                <TextBox Grid.Column="1" Text="{Binding Value, Mode=OneWay}"
+                         Margin="16,0,0,0" Padding="0"
+                         BorderThickness="0" Background="Transparent"
+                         IsReadOnly="True" IsTabStop="False"
+                         TextWrapping="Wrap" VerticalContentAlignment="Top"
+                         AutomationProperties.Name="{Binding Label}" />
+            </Grid>
+        </DataTemplate>
         <DataTemplate x:Key="TokenDetailTemplate">
             <Border BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                     BorderThickness="0,0,0,1" Padding="0,7">
@@ -745,17 +761,16 @@
                                  DisplayMemberPath="Name"
                                  AutomationProperties.AutomationId="PresetManagerList" />
                         <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-                            <StackPanel>
-                                <TextBlock Text="コピー元" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding ManagedPresetSource, Mode=OneWay}" IsReadOnly="True"
-                                         Margin="0,4,0,12" TextWrapping="Wrap" />
-                                <TextBlock Text="コピー先" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding ManagedPresetDestination, Mode=OneWay}" IsReadOnly="True"
-                                         Margin="0,4,0,12" TextWrapping="Wrap" />
-                                <TextBlock Text="テンプレート" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding ManagedPresetTemplate, Mode=OneWay}" IsReadOnly="True"
-                                         Margin="0,4,0,12" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding ManagedPresetDetails}" TextWrapping="Wrap" />
+                            <StackPanel Grid.IsSharedSizeScope="True">
+                                <TextBlock Text="設定内容" FontSize="16" FontWeight="SemiBold"
+                                           Margin="0,0,0,12" />
+                                <ItemsControl ItemsSource="{Binding ManagedPresetSettingRows}"
+                                              ItemTemplate="{StaticResource PresetDetailRowTemplate}" />
+                                <Separator Margin="0,8,0,14" />
+                                <TextBlock Text="プリセット情報" FontSize="16" FontWeight="SemiBold"
+                                           Margin="0,0,0,12" />
+                                <ItemsControl ItemsSource="{Binding ManagedPresetInformationRows}"
+                                              ItemTemplate="{StaticResource PresetDetailRowTemplate}" />
                                 <TextBlock Text="{Binding ManagedPresetWarning}"
                                            Visibility="{Binding ManagedPresetWarningVisibility}"
                                            Margin="0,12,0,0" Foreground="DarkGoldenrod"

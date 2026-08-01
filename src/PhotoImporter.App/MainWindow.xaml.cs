@@ -419,10 +419,8 @@ namespace PhotoImporter.App
             {
                 if (!Set(ref _selectedManagedPreset, value)) return;
                 OnPropertyChanged(nameof(CanManageSelectedPreset));
-                OnPropertyChanged(nameof(ManagedPresetSource));
-                OnPropertyChanged(nameof(ManagedPresetDestination));
-                OnPropertyChanged(nameof(ManagedPresetTemplate));
-                OnPropertyChanged(nameof(ManagedPresetDetails));
+                OnPropertyChanged(nameof(ManagedPresetSettingRows));
+                OnPropertyChanged(nameof(ManagedPresetInformationRows));
                 OnPropertyChanged(nameof(ManagedPresetWarning));
                 OnPropertyChanged(nameof(ManagedPresetWarningVisibility));
             }
@@ -437,32 +435,10 @@ namespace PhotoImporter.App
             }
         }
         public bool CanManageSelectedPreset => SelectedManagedPreset != null;
-        public string ManagedPresetSource => SelectedManagedPreset == null
-            ? string.Empty
-            : SelectedManagedPreset.SaveSourceFolder
-                ? SelectedManagedPreset.SourceFolder
-                : "保存しない";
-        public string ManagedPresetDestination => SelectedManagedPreset?.DestinationFolder ?? string.Empty;
-        public string ManagedPresetTemplate => SelectedManagedPreset?.TemplateText ?? string.Empty;
-        public string ManagedPresetDetails
-        {
-            get
-            {
-                var preset = SelectedManagedPreset;
-                if (preset == null) return string.Empty;
-                return string.Format(
-                    "上書き: {0}\n対象: {1}\nサイドカー: {2} ({3})\nRAW+JPEG: {4}\nExif: {5}\n作成: {6}\n更新: {7}\n最終利用: {8}",
-                    preset.OverwriteExisting ? "する" : "しない",
-                    preset.SourceFileSelectionMode == SourceFileSelectionMode.AllFiles ? "すべての通常ファイル" : "画像・RAW・動画",
-                    preset.AssociateSidecars ? "関連付ける" : "関連付けない",
-                    string.Join(", ", preset.SidecarExtensions),
-                    preset.AnalyzeJpegOnlyForRawJpegPair ? "JPEGのみ解析" : "両方を解析",
-                    preset.ReadExifInformation ? "常に読込" : "必要時のみ",
-                    preset.CreatedUtc.ToLocalTime().ToString("g"),
-                    preset.UpdatedUtc.ToLocalTime().ToString("g"),
-                    preset.LastUsedUtc.HasValue ? preset.LastUsedUtc.Value.ToLocalTime().ToString("g") : "未使用");
-            }
-        }
+        public IReadOnlyList<PresetDetailRow> ManagedPresetSettingRows =>
+            PresetDetailRows.CreateSettings(SelectedManagedPreset);
+        public IReadOnlyList<PresetDetailRow> ManagedPresetInformationRows =>
+            PresetDetailRows.CreateInformation(SelectedManagedPreset);
         public string ManagedPresetWarning => GetPresetValidationWarning(SelectedManagedPreset);
         public Visibility ManagedPresetWarningVisibility => string.IsNullOrEmpty(ManagedPresetWarning)
             ? Visibility.Collapsed
