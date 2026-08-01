@@ -107,6 +107,51 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <Grid Grid.Row="0" Grid.ColumnSpan="3" Margin="0,0,0,10"
+              IsEnabled="{Binding CanEditSettings}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="112" />
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="プリセット" VerticalAlignment="Center" />
+            <ComboBox x:Name="PresetSelector" Grid.Column="1"
+                      ItemsSource="{Binding Presets}"
+                      DisplayMemberPath="Name"
+                      SelectedItem="{Binding SelectedPreset, Mode=OneWay}"
+                      DropDownOpened="PresetSelector_DropDownOpened"
+                      SelectionChanged="PresetSelector_SelectionChanged"
+                      PreviewMouseWheel="PresetSelector_PreviewMouseWheel"
+                      AutomationProperties.AutomationId="PresetSelector"
+                      AutomationProperties.Name="設定プリセット" />
+            <Button Grid.Column="2" Content="保存" Margin="8,0,0,0" Padding="12,3"
+                    Click="SavePreset_Click"
+                    AutomationProperties.AutomationId="SavePreset" />
+            <Button Grid.Column="3" Content="名前を付けて保存..." Margin="8,0,0,0" Padding="12,3"
+                    Click="SavePresetAs_Click"
+                    AutomationProperties.AutomationId="SavePresetAs" />
+            <Button x:Name="OpenPresetManagerButton" Grid.Column="4" Content="管理..." Margin="8,0,0,0" Padding="12,3"
+                    Click="ShowPresetManager_Click"
+                    AutomationProperties.AutomationId="OpenPresetManager" />
+            <TextBlock Grid.Column="5" Text="{Binding PresetStatusText}"
+                       Visibility="{Binding PresetStatusVisibility}"
+                       Margin="12,0,0,0" VerticalAlignment="Center"
+                       Foreground="DarkGoldenrod"
+                       AutomationProperties.AutomationId="PresetDirtyIndicator" />
+            <StackPanel Grid.Column="6" Orientation="Horizontal"
+                        Visibility="{Binding PresetUndoVisibility}">
+                <TextBlock Text="プリセットを適用しました" VerticalAlignment="Center" />
+                <Button Content="元に戻す" Margin="8,0,0,0" Padding="10,3"
+                        IsEnabled="{Binding CanUndoPresetApply}"
+                        Click="UndoPresetApply_Click"
+                        AutomationProperties.AutomationId="UndoPresetApply" />
+            </StackPanel>
+        </Grid>
+
         <Grid Grid.Row="1" Margin="0,0,0,10" IsEnabled="{Binding CanEditSettings}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="112" />
@@ -656,6 +701,106 @@
                 </ScrollViewer>
             </DockPanel>
         </Border>
+
+        <Grid Grid.Row="0" Grid.RowSpan="10" Grid.ColumnSpan="3" Panel.ZIndex="60"
+              Visibility="{Binding PresetManagerOverlayVisibility}"
+              Background="#66000000">
+            <Border Margin="44" Padding="18"
+                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    BorderThickness="1" CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="プリセット管理" FontSize="20" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="1" Width="140" Margin="12,0"
+                                  ItemsSource="{Binding PresetManagerSortModes}"
+                                  SelectedItem="{Binding PresetManagerSortMode, Mode=TwoWay}"
+                                  AutomationProperties.AutomationId="PresetManagerSortMode"
+                                  AutomationProperties.Name="プリセットの表示順" />
+                        <Button x:Name="PresetManagerCloseButton" Grid.Column="2"
+                                Content="閉じる" Padding="12,3"
+                                Click="CloseOverlay_Click"
+                                AutomationProperties.AutomationId="ClosePresetManager" />
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="0,16,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="320" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ListBox ItemsSource="{Binding ManagedPresets}"
+                                 SelectedItem="{Binding SelectedManagedPreset, Mode=TwoWay}"
+                                 DisplayMemberPath="Name"
+                                 AutomationProperties.AutomationId="PresetManagerList" />
+                        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="コピー元" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding ManagedPresetSource, Mode=OneWay}" IsReadOnly="True"
+                                         Margin="0,4,0,12" TextWrapping="Wrap" />
+                                <TextBlock Text="コピー先" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding ManagedPresetDestination, Mode=OneWay}" IsReadOnly="True"
+                                         Margin="0,4,0,12" TextWrapping="Wrap" />
+                                <TextBlock Text="テンプレート" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding ManagedPresetTemplate, Mode=OneWay}" IsReadOnly="True"
+                                         Margin="0,4,0,12" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ManagedPresetDetails}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ManagedPresetWarning}"
+                                           Visibility="{Binding ManagedPresetWarningVisibility}"
+                                           Margin="0,12,0,0" Foreground="DarkGoldenrod"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Content="名前の変更..." Padding="10,3"
+                                IsEnabled="{Binding CanManageSelectedPreset}"
+                                Click="RenamePreset_Click"
+                                AutomationProperties.AutomationId="RenamePreset" />
+                        <Button Grid.Column="1" Content="複製..." Margin="8,0,0,0" Padding="10,3"
+                                IsEnabled="{Binding CanManageSelectedPreset}"
+                                Click="DuplicatePreset_Click"
+                                AutomationProperties.AutomationId="DuplicatePreset" />
+                        <Button Grid.Column="2" Content="削除..." Margin="8,0,0,0" Padding="10,3"
+                                IsEnabled="{Binding CanManageSelectedPreset}"
+                                Click="DeletePreset_Click"
+                                AutomationProperties.AutomationId="DeletePreset" />
+                        <Button Grid.Column="3" Content="テンプレートだけ取り込む" Margin="8,0,0,0" Padding="10,3"
+                                IsEnabled="{Binding CanManageSelectedPreset}"
+                                Click="ApplyManagedTemplate_Click"
+                                AutomationProperties.AutomationId="ApplyPresetTemplate" />
+                        <Button Grid.Column="5" Content="エクスポート..." Padding="10,3"
+                                IsEnabled="{Binding CanManageSelectedPreset}"
+                                Click="ExportPreset_Click"
+                                AutomationProperties.AutomationId="ExportPreset" />
+                        <Button Grid.Column="6" Content="インポート..." Margin="8,0,0,0" Padding="10,3"
+                                Click="ImportPreset_Click"
+                                AutomationProperties.AutomationId="ImportPreset" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
 
         <Grid Grid.Row="8" Grid.ColumnSpan="3" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>

@@ -44,6 +44,15 @@ namespace PhotoImporter.App
         private string _customExifCacheRoot;
         private readonly List<string> _previousExifCacheRoots = new List<string>();
         private readonly PhotoImporterSettingsStore _settingsStore;
+        private readonly PhotoImporterPresetStore _presetStore;
+        private Guid? _lastAppliedPresetId;
+        private PhotoImporterPreset _selectedPreset;
+        private PresetSettingsSnapshot _unselectedPresetBaseline;
+        private PresetUndoState _presetUndo;
+        private bool _isApplyingPreset;
+        private bool _suppressPresetSelection;
+        private PhotoImporterPreset _selectedManagedPreset;
+        private string _presetManagerSortMode = "名前順";
         private bool _previewIsCurrent;
         private double _progressPercent;
         private int _exifCacheHits;
@@ -69,7 +78,8 @@ namespace PhotoImporter.App
         {
             None,
             ExifSettings,
-            Filter
+            Filter,
+            PresetManager
         }
 
         public MainWindow()
@@ -80,6 +90,10 @@ namespace PhotoImporter.App
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PhotoImporter",
                 "settings.xml"));
+            _presetStore = new PhotoImporterPresetStore(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PhotoImporter",
+                "presets.xml"));
             string settingsWarning = null;
             try
             {
@@ -94,6 +108,7 @@ namespace PhotoImporter.App
             _itemCollectionState = new PreviewItemCollectionState(Items);
             FilterFieldOptions = FilterFieldOption.CreateAll();
             DataContext = this;
+            ReloadPresets(_lastAppliedPresetId, true, true);
             Closing += MainWindow_Closing;
             ContentRendered += MainWindow_ContentRendered;
             if (settingsWarning != null) SetMessage(settingsWarning, Brushes.DarkGoldenrod);
@@ -103,6 +118,9 @@ namespace PhotoImporter.App
 
         public ObservableCollection<PreviewItem> Items { get; } = new ObservableCollection<PreviewItem>();
         public ObservableCollection<FilterConditionEditor> FilterConditions { get; } = new ObservableCollection<FilterConditionEditor>();
+        public ObservableCollection<PhotoImporterPreset> Presets { get; } = new ObservableCollection<PhotoImporterPreset>();
+        public ObservableCollection<PhotoImporterPreset> ManagedPresets { get; } = new ObservableCollection<PhotoImporterPreset>();
+        public IReadOnlyList<string> PresetManagerSortModes { get; } = new[] { "名前順", "最終利用日順" };
         internal IReadOnlyList<FilterFieldOption> FilterFieldOptions { get; private set; }
         public ICollectionView ItemsView => _itemCollectionState.View;
         public IReadOnlyList<TokenDetailItem> FileSystemTokenDetails { get; }
@@ -163,7 +181,7 @@ namespace PhotoImporter.App
             {
                 if (!Set(ref _useExifCache, value)) return;
                 NotifyExifSettingsSummaryChanged();
-                SettingsChanged();
+                SettingsChanged(false);
             }
         }
 
@@ -304,6 +322,36 @@ namespace PhotoImporter.App
         public bool CanCopy => !_isBusy && _previewIsCurrent && _itemCollectionState.CopyTargets.Any();
         public bool CanEditFilters => !_isBusy && _previewIsCurrent;
         public bool CanApplyFilter => CanEditFilters && FilterConditions.All(item => item.IsValid);
+        public PhotoImporterPreset SelectedPreset
+        {
+            get => _selectedPreset;
+            private set
+            {
+                if (!Set(ref _selectedPreset, value)) return;
+                _lastAppliedPresetId = value?.Id;
+                NotifyPresetStateChanged();
+            }
+        }
+        public bool HasPresetChanges
+        {
+            get
+            {
+                var current = CapturePresetSnapshot();
+                return SelectedPreset != null
+                    ? !current.Matches(SelectedPreset)
+                    : _unselectedPresetBaseline != null && !current.EquivalentTo(_unselectedPresetBaseline);
+            }
+        }
+        public string PresetStatusText => SelectedPreset == null
+            ? HasPresetChanges ? "(プリセットなし) ● 未保存の変更" : "(プリセットなし)"
+            : HasPresetChanges ? "● 未保存の変更" : string.Empty;
+        public Visibility PresetStatusVisibility => string.IsNullOrEmpty(PresetStatusText)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        public bool CanUndoPresetApply => _presetUndo != null && !_isBusy;
+        public Visibility PresetUndoVisibility => _presetUndo == null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         public int AppliedFilterCount
         {
             get => _appliedFilterCount;
@@ -361,6 +409,64 @@ namespace PhotoImporter.App
         public Visibility FilterOverlayVisibility => _activeOverlay == OverlayPanel.Filter
             ? Visibility.Visible
             : Visibility.Collapsed;
+        public Visibility PresetManagerOverlayVisibility => _activeOverlay == OverlayPanel.PresetManager
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        public PhotoImporterPreset SelectedManagedPreset
+        {
+            get => _selectedManagedPreset;
+            set
+            {
+                if (!Set(ref _selectedManagedPreset, value)) return;
+                OnPropertyChanged(nameof(CanManageSelectedPreset));
+                OnPropertyChanged(nameof(ManagedPresetSource));
+                OnPropertyChanged(nameof(ManagedPresetDestination));
+                OnPropertyChanged(nameof(ManagedPresetTemplate));
+                OnPropertyChanged(nameof(ManagedPresetDetails));
+                OnPropertyChanged(nameof(ManagedPresetWarning));
+                OnPropertyChanged(nameof(ManagedPresetWarningVisibility));
+            }
+        }
+        public string PresetManagerSortMode
+        {
+            get => _presetManagerSortMode;
+            set
+            {
+                if (!Set(ref _presetManagerSortMode, value)) return;
+                RefreshManagedPresets(SelectedManagedPreset?.Id);
+            }
+        }
+        public bool CanManageSelectedPreset => SelectedManagedPreset != null;
+        public string ManagedPresetSource => SelectedManagedPreset == null
+            ? string.Empty
+            : SelectedManagedPreset.SaveSourceFolder
+                ? SelectedManagedPreset.SourceFolder
+                : "保存しない";
+        public string ManagedPresetDestination => SelectedManagedPreset?.DestinationFolder ?? string.Empty;
+        public string ManagedPresetTemplate => SelectedManagedPreset?.TemplateText ?? string.Empty;
+        public string ManagedPresetDetails
+        {
+            get
+            {
+                var preset = SelectedManagedPreset;
+                if (preset == null) return string.Empty;
+                return string.Format(
+                    "上書き: {0}\n対象: {1}\nサイドカー: {2} ({3})\nRAW+JPEG: {4}\nExif: {5}\n作成: {6}\n更新: {7}\n最終利用: {8}",
+                    preset.OverwriteExisting ? "する" : "しない",
+                    preset.SourceFileSelectionMode == SourceFileSelectionMode.AllFiles ? "すべての通常ファイル" : "画像・RAW・動画",
+                    preset.AssociateSidecars ? "関連付ける" : "関連付けない",
+                    string.Join(", ", preset.SidecarExtensions),
+                    preset.AnalyzeJpegOnlyForRawJpegPair ? "JPEGのみ解析" : "両方を解析",
+                    preset.ReadExifInformation ? "常に読込" : "必要時のみ",
+                    preset.CreatedUtc.ToLocalTime().ToString("g"),
+                    preset.UpdatedUtc.ToLocalTime().ToString("g"),
+                    preset.LastUsedUtc.HasValue ? preset.LastUsedUtc.Value.ToLocalTime().ToString("g") : "未使用");
+            }
+        }
+        public string ManagedPresetWarning => GetPresetValidationWarning(SelectedManagedPreset);
+        public Visibility ManagedPresetWarningVisibility => string.IsNullOrEmpty(ManagedPresetWarning)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         public string CopyButtonText => string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
         public string ViewSelectionSummary
         {
@@ -416,6 +522,13 @@ namespace PhotoImporter.App
 
         private void ShowFilterOverlay_Click(object sender, RoutedEventArgs e) =>
             SetActiveOverlay(OverlayPanel.Filter);
+
+        private void ShowPresetManager_Click(object sender, RoutedEventArgs e)
+        {
+            ReloadPresets(SelectedPreset?.Id, true);
+            RefreshManagedPresets(SelectedPreset?.Id);
+            SetActiveOverlay(OverlayPanel.PresetManager);
+        }
 
         private void CloseOverlay_Click(object sender, RoutedEventArgs e) =>
             CloseOverlay(true);
@@ -561,6 +674,8 @@ namespace PhotoImporter.App
         private async Task<bool> ScanAsync()
         {
             CancellationTokenSource scanCancellation = null;
+            _presetUndo = null;
+            NotifyPresetStateChanged();
             SetBusy(true, false);
             SelectedPreviewItem = null;
             Items.Clear();
@@ -1462,10 +1577,12 @@ namespace PhotoImporter.App
             _activeOverlay = overlay;
             OnPropertyChanged(nameof(ExifSettingsOverlayVisibility));
             OnPropertyChanged(nameof(FilterOverlayVisibility));
+            OnPropertyChanged(nameof(PresetManagerOverlayVisibility));
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (_activeOverlay == OverlayPanel.ExifSettings) ExifOverlayCloseButton.Focus();
                 else if (_activeOverlay == OverlayPanel.Filter) FilterOverlayCloseButton.Focus();
+                else if (_activeOverlay == OverlayPanel.PresetManager) PresetManagerCloseButton.Focus();
             }), DispatcherPriority.Input);
         }
 
@@ -1476,11 +1593,13 @@ namespace PhotoImporter.App
             _activeOverlay = OverlayPanel.None;
             OnPropertyChanged(nameof(ExifSettingsOverlayVisibility));
             OnPropertyChanged(nameof(FilterOverlayVisibility));
+            OnPropertyChanged(nameof(PresetManagerOverlayVisibility));
             if (!restoreFocus) return;
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (closing == OverlayPanel.ExifSettings) ExifSettingsButton.Focus();
-                else FilterSettingsButton.Focus();
+                else if (closing == OverlayPanel.Filter) FilterSettingsButton.Focus();
+                else OpenPresetManagerButton.Focus();
             }), DispatcherPriority.Input);
         }
 
@@ -1513,14 +1632,640 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(ExifSettingsToolTip));
         }
 
-        private void SettingsChanged()
+        private void PresetSelector_DropDownOpened(object sender, EventArgs e) =>
+            ReloadPresets(SelectedPreset?.Id, true);
+
+        private void PresetSelector_PreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
+            e.Handled = true;
+
+        private void PresetSelector_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (_suppressPresetSelection) return;
+            var requested = PresetSelector.SelectedItem as PhotoImporterPreset;
+            if (requested == null || (SelectedPreset != null && requested.Id == SelectedPreset.Id)) return;
+            ApplyPresetSelection(requested);
+        }
+
+        private void SavePreset_Click(object sender, RoutedEventArgs e) => SaveCurrentPreset();
+
+        private void SavePresetAs_Click(object sender, RoutedEventArgs e) => SaveCurrentPresetAs();
+
+        private void UndoPresetApply_Click(object sender, RoutedEventArgs e)
+        {
+            var undo = _presetUndo;
+            if (undo == null || _isBusy) return;
+            _isApplyingPreset = true;
+            try
+            {
+                ApplyPresetSnapshot(undo.Settings);
+                var restored = undo.SelectedPresetId.HasValue
+                    ? Presets.FirstOrDefault(item => item.Id == undo.SelectedPresetId.Value)
+                    : null;
+                SetSelectedPresetWithoutApplying(restored);
+                _unselectedPresetBaseline = undo.UnselectedBaseline;
+            }
+            finally
+            {
+                _isApplyingPreset = false;
+                _presetUndo = null;
+                NotifyPresetStateChanged();
+            }
+            ValidateCurrentSettingsAfterPresetApply();
+        }
+
+        private void ApplyPresetSelection(PhotoImporterPreset requested)
+        {
+            if (requested == null) return;
+            if (HasPresetChanges)
+            {
+                var choice = PresetDialogs.ConfirmApply(this, requested.Name);
+                if (choice == PresetApplyChoice.Cancel)
+                {
+                    SetSelectedPresetWithoutApplying(SelectedPreset);
+                    return;
+                }
+                if (choice == PresetApplyChoice.SaveThenApply && !SaveCurrentPreset())
+                {
+                    SetSelectedPresetWithoutApplying(SelectedPreset);
+                    return;
+                }
+                requested = Presets.FirstOrDefault(item => item.Id == requested.Id) ?? requested;
+            }
+
+            var undo = new PresetUndoState(
+                CapturePresetSnapshot(),
+                SelectedPreset?.Id,
+                _unselectedPresetBaseline);
+            _isApplyingPreset = true;
+            try
+            {
+                if (requested.SaveSourceFolder) SourceFolder = requested.SourceFolder;
+                DestinationFolder = requested.DestinationFolder;
+                TemplateText = requested.TemplateText;
+                OverwriteExisting = requested.OverwriteExisting;
+                IncludeOtherFiles = requested.SourceFileSelectionMode == SourceFileSelectionMode.AllFiles;
+                AssociateSidecars = requested.AssociateSidecars;
+                SidecarExtensionsText = string.Join("; ", requested.SidecarExtensions);
+                AnalyzeJpegOnlyForRawJpegPair = requested.AnalyzeJpegOnlyForRawJpegPair;
+                ReadExifInformation = requested.ReadExifInformation;
+                SetSelectedPresetWithoutApplying(requested);
+            }
+            finally
+            {
+                _isApplyingPreset = false;
+            }
+            _presetUndo = undo;
+            NotifyPresetStateChanged();
+            ValidateCurrentSettingsAfterPresetApply();
+
+            try
+            {
+                var refreshed = _presetStore.TouchLastUsed(requested.Id, DateTime.UtcNow);
+                ReplacePresets(refreshed, requested.Id, false);
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                SetMessage("プリセットは適用しましたが、最終利用日時を保存できませんでした。 " + ex.Message,
+                    Brushes.DarkGoldenrod);
+            }
+        }
+
+        private bool SaveCurrentPreset()
+        {
+            if (_isBusy) return false;
+            if (SelectedPreset == null) return SaveCurrentPresetAs();
+            PhotoImporterPreset updated;
+            if (!TryCreatePresetFromCurrent(
+                SelectedPreset.Id,
+                SelectedPreset.Name,
+                SelectedPreset.CreatedUtc,
+                DateTime.UtcNow,
+                SelectedPreset.LastUsedUtc,
+                SelectedPreset.SaveSourceFolder,
+                out updated)) return false;
+            try
+            {
+                var refreshed = _presetStore.Update(updated);
+                ReplacePresets(refreshed, updated.Id, false);
+                _presetUndo = null;
+                NotifyPresetStateChanged();
+                SetMessage("プリセット「" + updated.Name + "」を保存しました。", Brushes.DimGray);
+                return true;
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセットを保存できませんでした。", ex);
+                ReloadPresets(SelectedPreset?.Id, false);
+                return false;
+            }
+        }
+
+        private bool SaveCurrentPresetAs()
+        {
+            if (_isBusy) return false;
+            var input = PresetDialogs.PromptForName(this, "名前を付けて保存", string.Empty, false, true);
+            if (input == null) return false;
+            string name;
+            try
+            {
+                name = PhotoImporterPresetStore.NormalizeName(input.Name);
+            }
+            catch (ArgumentException ex)
+            {
+                ShowPresetError("プリセット名が正しくありません。", ex);
+                return false;
+            }
+
+            ReloadPresets(SelectedPreset?.Id, true);
+            var existing = Presets.FirstOrDefault(item =>
+                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                var confirmation = MessageBox.Show(
+                    this,
+                    "同じ名前のプリセットがあります。\n「" + existing.Name + "」を上書きしますか？",
+                    "プリセットを上書き",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (confirmation != MessageBoxResult.Yes) return false;
+            }
+
+            var now = DateTime.UtcNow;
+            PhotoImporterPreset preset;
+            if (!TryCreatePresetFromCurrent(
+                existing?.Id ?? Guid.NewGuid(),
+                name,
+                existing?.CreatedUtc ?? now,
+                now,
+                now,
+                input.SaveSourceFolder,
+                out preset)) return false;
+            try
+            {
+                var refreshed = existing == null
+                    ? _presetStore.Add(preset)
+                    : _presetStore.Update(preset);
+                ReplacePresets(refreshed, preset.Id, false);
+                _presetUndo = null;
+                NotifyPresetStateChanged();
+                SetMessage("プリセット「" + preset.Name + "」を保存しました。", Brushes.DimGray);
+                return true;
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセットを保存できませんでした。", ex);
+                ReloadPresets(SelectedPreset?.Id, false);
+                return false;
+            }
+        }
+
+        private void RenamePreset_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedManagedPreset;
+            if (selected == null) return;
+            var input = PresetDialogs.PromptForName(
+                this, "プリセット名を変更", selected.Name, selected.SaveSourceFolder, false);
+            if (input == null) return;
+            try
+            {
+                var renamed = selected.Clone();
+                renamed.Name = PhotoImporterPresetStore.NormalizeName(input.Name);
+                renamed.UpdatedUtc = DateTime.UtcNow;
+                var refreshed = _presetStore.Update(renamed);
+                ReplacePresets(refreshed, SelectedPreset?.Id, false);
+                RefreshManagedPresets(renamed.Id);
+                SetMessage("プリセット名を「" + renamed.Name + "」へ変更しました。", Brushes.DimGray);
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセット名を変更できませんでした。", ex);
+                ReloadPresets(SelectedPreset?.Id, false);
+                RefreshManagedPresets(selected.Id);
+            }
+        }
+
+        private void DuplicatePreset_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedManagedPreset;
+            if (selected == null) return;
+            var input = PresetDialogs.PromptForName(
+                this, "プリセットを複製", selected.Name + " - コピー", selected.SaveSourceFolder, false);
+            if (input == null) return;
+            try
+            {
+                var now = DateTime.UtcNow;
+                var duplicate = selected.Clone();
+                duplicate.Id = Guid.NewGuid();
+                duplicate.Name = PhotoImporterPresetStore.NormalizeName(input.Name);
+                duplicate.CreatedUtc = now;
+                duplicate.UpdatedUtc = now;
+                duplicate.LastUsedUtc = null;
+                var refreshed = _presetStore.Add(duplicate);
+                ReplacePresets(refreshed, SelectedPreset?.Id, false);
+                RefreshManagedPresets(duplicate.Id);
+                SetMessage("プリセット「" + duplicate.Name + "」を作成しました。", Brushes.DimGray);
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセットを複製できませんでした。", ex);
+                ReloadPresets(SelectedPreset?.Id, false);
+                RefreshManagedPresets(selected.Id);
+            }
+        }
+
+        private void DeletePreset_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedManagedPreset;
+            if (selected == null) return;
+            var confirmation = MessageBox.Show(
+                this,
+                "プリセット「" + selected.Name + "」を削除しますか？\n\n" +
+                "削除しても、コピー済みの写真と設定ファイルの現在値は変わりません。",
+                "プリセットを削除",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirmation != MessageBoxResult.Yes) return;
+            try
+            {
+                var deletesCurrent = SelectedPreset != null && SelectedPreset.Id == selected.Id;
+                var refreshed = _presetStore.Delete(selected.Id);
+                ReplacePresets(refreshed, deletesCurrent ? null : SelectedPreset?.Id, deletesCurrent);
+                if (deletesCurrent)
+                {
+                    _presetUndo = null;
+                    _unselectedPresetBaseline = CapturePresetSnapshot();
+                    NotifyPresetStateChanged();
+                }
+                RefreshManagedPresets(null);
+                SetMessage("プリセット「" + selected.Name + "」を削除しました。", Brushes.DimGray);
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセットを削除できませんでした。", ex);
+                ReloadPresets(SelectedPreset?.Id, false);
+                RefreshManagedPresets(null);
+            }
+        }
+
+        private void ExportPreset_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedManagedPreset;
+            if (selected == null) return;
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "プリセットをエクスポート",
+                Filter = "PhotoImporter プリセット (*.xml)|*.xml|すべてのファイル (*.*)|*.*",
+                DefaultExt = ".xml",
+                AddExtension = true,
+                OverwritePrompt = true,
+                FileName = CreateSafePresetFileName(selected.Name) + ".xml"
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            try
+            {
+                _presetStore.WriteExportFile(dialog.FileName, selected);
+                SetMessage("プリセットをエクスポートしました。 " + dialog.FileName, Brushes.DimGray);
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセットをエクスポートできませんでした。", ex);
+            }
+        }
+
+        private void ImportPreset_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "プリセットをインポート",
+                Filter = "PhotoImporter プリセット (*.xml)|*.xml|すべてのファイル (*.*)|*.*",
+                Multiselect = false
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            try
+            {
+                var imported = _presetStore.ReadExportFile(dialog.FileName);
+                ReloadPresets(SelectedPreset?.Id, false);
+                var idMatch = Presets.FirstOrDefault(item => item.Id == imported.Id);
+                var nameMatch = Presets.FirstOrDefault(item =>
+                    string.Equals(item.Name, imported.Name, StringComparison.OrdinalIgnoreCase));
+                if (idMatch != null && nameMatch != null && idMatch.Id != nameMatch.Id)
+                    throw new InvalidOperationException(
+                        "インポートするプリセットの id と名前が、それぞれ別の既存プリセットと重複しています。");
+
+                var conflict = idMatch ?? nameMatch;
+                IReadOnlyList<PhotoImporterPreset> refreshed;
+                Guid importedId;
+                if (conflict == null)
+                {
+                    imported.LastUsedUtc = null;
+                    refreshed = _presetStore.Add(imported);
+                    importedId = imported.Id;
+                }
+                else
+                {
+                    var choice = PresetDialogs.ConfirmImportConflict(this, imported.Name, conflict.Name);
+                    if (choice == PresetImportChoice.Skip) return;
+                    if (choice == PresetImportChoice.Overwrite)
+                    {
+                        imported.Id = conflict.Id;
+                        imported.CreatedUtc = conflict.CreatedUtc;
+                        imported.UpdatedUtc = DateTime.UtcNow;
+                        imported.LastUsedUtc = conflict.LastUsedUtc;
+                        refreshed = _presetStore.Update(imported);
+                        importedId = imported.Id;
+                    }
+                    else
+                    {
+                        var nameInput = PresetDialogs.PromptForName(
+                            this, "別名でインポート", imported.Name + " - コピー", imported.SaveSourceFolder, false);
+                        if (nameInput == null) return;
+                        var now = DateTime.UtcNow;
+                        imported.Id = Guid.NewGuid();
+                        imported.Name = PhotoImporterPresetStore.NormalizeName(nameInput.Name);
+                        imported.CreatedUtc = now;
+                        imported.UpdatedUtc = now;
+                        imported.LastUsedUtc = null;
+                        refreshed = _presetStore.Add(imported);
+                        importedId = imported.Id;
+                    }
+                }
+                ReplacePresets(refreshed, SelectedPreset?.Id, false);
+                RefreshManagedPresets(importedId);
+                var warning = GetPresetValidationWarning(imported);
+                SetMessage(
+                    string.IsNullOrEmpty(warning)
+                        ? "プリセット「" + imported.Name + "」をインポートしました。"
+                        : "プリセットをインポートしましたが、設定に警告があります。 " + warning,
+                    string.IsNullOrEmpty(warning) ? Brushes.DimGray : Brushes.DarkGoldenrod);
+            }
+            catch (Exception ex) when (IsPresetStoreFailure(ex))
+            {
+                ShowPresetError("プリセットをインポートできませんでした。", ex);
+                ReloadPresets(SelectedPreset?.Id, false);
+                RefreshManagedPresets(null);
+            }
+        }
+
+        private void ApplyManagedTemplate_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedManagedPreset == null || _isBusy) return;
+            TemplateText = SelectedManagedPreset.TemplateText;
+            SetMessage("プリセット「" + SelectedManagedPreset.Name + "」からテンプレートだけを取り込みました。",
+                Brushes.DimGray);
+        }
+
+        private void RefreshManagedPresets(Guid? selectedId)
+        {
+            if (ManagedPresets == null) return;
+            var ordered = string.Equals(PresetManagerSortMode, "最終利用日順", StringComparison.Ordinal)
+                ? Presets.OrderByDescending(item => item.LastUsedUtc.HasValue)
+                    .ThenByDescending(item => item.LastUsedUtc)
+                    .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                : Presets.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase);
+            ManagedPresets.Clear();
+            foreach (var preset in ordered) ManagedPresets.Add(preset);
+            SelectedManagedPreset = selectedId.HasValue
+                ? ManagedPresets.FirstOrDefault(item => item.Id == selectedId.Value)
+                : null;
+        }
+
+        private static string CreateSafePresetFileName(string name)
+        {
+            var invalid = new HashSet<char>(Path.GetInvalidFileNameChars());
+            var value = new string((name ?? "preset").Select(character =>
+                invalid.Contains(character) ? '_' : character).ToArray()).Trim();
+            return string.IsNullOrEmpty(value) ? "preset" : value;
+        }
+
+        private static string GetPresetValidationWarning(PhotoImporterPreset preset)
+        {
+            if (preset == null) return string.Empty;
+            var warnings = new List<string>();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(preset.DestinationFolder) ||
+                    !Path.IsPathRooted(preset.DestinationFolder))
+                    warnings.Add("コピー先が絶対パスではありません。");
+                else if (!Directory.Exists(preset.DestinationFolder))
+                    warnings.Add("コピー先が存在しません。");
+                if (preset.SaveSourceFolder)
+                {
+                    if (string.IsNullOrWhiteSpace(preset.SourceFolder) || !Path.IsPathRooted(preset.SourceFolder))
+                        warnings.Add("コピー元が絶対パスではありません。");
+                    else if (!Directory.Exists(preset.SourceFolder))
+                        warnings.Add("コピー元が存在しません。");
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException ||
+                                       ex is PathTooLongException)
+            {
+                warnings.Add("フォルダーパスが正しくありません。");
+            }
+            var parsed = TemplateParser.Parse(preset.TemplateText ?? string.Empty);
+            if (!parsed.IsValid) warnings.Add("テンプレートが正しくありません。");
+            try
+            {
+                SidecarPolicy.Create(preset.AssociateSidecars, preset.SidecarExtensions);
+            }
+            catch (ArgumentException ex)
+            {
+                warnings.Add(ex.Message);
+            }
+            return string.Join(" ", warnings.Distinct());
+        }
+
+        private bool TryCreatePresetFromCurrent(
+            Guid id,
+            string name,
+            DateTime createdUtc,
+            DateTime updatedUtc,
+            DateTime? lastUsedUtc,
+            bool saveSourceFolder,
+            out PhotoImporterPreset preset)
+        {
+            preset = null;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(DestinationFolder) || !Path.IsPathRooted(DestinationFolder))
+                    throw new ArgumentException("コピー先には絶対パスを指定してください。");
+                if (saveSourceFolder &&
+                    (string.IsNullOrWhiteSpace(SourceFolder) || !Path.IsPathRooted(SourceFolder)))
+                    throw new ArgumentException("保存するコピー元には絶対パスを指定してください。");
+                var destination = NormalizePath(DestinationFolder);
+                var source = saveSourceFolder ? NormalizePath(SourceFolder) : null;
+                if (saveSourceFolder &&
+                    (IsSameOrUnder(source, destination) || IsSameOrUnder(destination, source)))
+                    throw new InvalidOperationException(
+                        "コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
+                var parsed = TemplateParser.Parse(TemplateText);
+                if (!parsed.IsValid)
+                    throw new ArgumentException(string.Format(
+                        "テンプレートエラー: {0}（位置 {1}）", parsed.Error.Code, parsed.Error.Position + 1));
+                var sidecarPolicy = CreateSidecarPolicy(AssociateSidecars, SidecarExtensionsText);
+                preset = new PhotoImporterPreset
+                {
+                    Id = id,
+                    Name = PhotoImporterPresetStore.NormalizeName(name),
+                    CreatedUtc = createdUtc,
+                    UpdatedUtc = updatedUtc,
+                    LastUsedUtc = lastUsedUtc,
+                    SaveSourceFolder = saveSourceFolder,
+                    SourceFolder = source,
+                    DestinationFolder = destination,
+                    TemplateText = TemplateText,
+                    OverwriteExisting = OverwriteExisting,
+                    SourceFileSelectionMode = _sourceFileSelectionMode,
+                    AssociateSidecars = AssociateSidecars,
+                    AnalyzeJpegOnlyForRawJpegPair = AnalyzeJpegOnlyForRawJpegPair,
+                    ReadExifInformation = ReadExifInformation
+                };
+                foreach (var extension in sidecarPolicy.Extensions) preset.SidecarExtensions.Add(extension);
+                return true;
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException ||
+                                       ex is NotSupportedException || ex is PathTooLongException)
+            {
+                ShowPresetError("現在の設定をプリセットへ保存できません。", ex);
+                return false;
+            }
+        }
+
+        private PresetSettingsSnapshot CapturePresetSnapshot() => new PresetSettingsSnapshot(
+            SourceFolder,
+            DestinationFolder,
+            TemplateText,
+            OverwriteExisting,
+            _sourceFileSelectionMode,
+            AssociateSidecars,
+            SplitSidecarExtensions(SidecarExtensionsText),
+            AnalyzeJpegOnlyForRawJpegPair,
+            ReadExifInformation);
+
+        private void ApplyPresetSnapshot(PresetSettingsSnapshot snapshot)
+        {
+            SourceFolder = snapshot.SourceFolder;
+            DestinationFolder = snapshot.DestinationFolder;
+            TemplateText = snapshot.TemplateText;
+            OverwriteExisting = snapshot.OverwriteExisting;
+            IncludeOtherFiles = snapshot.SourceFileSelectionMode == SourceFileSelectionMode.AllFiles;
+            AssociateSidecars = snapshot.AssociateSidecars;
+            SidecarExtensionsText = string.Join("; ", snapshot.SidecarExtensions);
+            AnalyzeJpegOnlyForRawJpegPair = snapshot.AnalyzeJpegOnlyForRawJpegPair;
+            ReadExifInformation = snapshot.ReadExifInformation;
+        }
+
+        private static IEnumerable<string> SplitSidecarExtensions(string text) =>
+            (text ?? string.Empty).Split(
+                new[] { ';', ',', ' ', '\t', '\r', '\n' },
+                StringSplitOptions.RemoveEmptyEntries);
+
+        private void ValidateCurrentSettingsAfterPresetApply()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(SourceFolder) || !Path.IsPathRooted(SourceFolder))
+                    throw new ArgumentException("コピー元には絶対パスを指定してください。");
+                if (string.IsNullOrWhiteSpace(DestinationFolder) || !Path.IsPathRooted(DestinationFolder))
+                    throw new ArgumentException("コピー先には絶対パスを指定してください。");
+                var source = Path.GetFullPath(SourceFolder ?? string.Empty);
+                var destination = Path.GetFullPath(DestinationFolder ?? string.Empty);
+                ValidateRoots(source, destination);
+                var parsed = TemplateParser.Parse(TemplateText);
+                if (!parsed.IsValid)
+                {
+                    ShowTemplateError(parsed.Error);
+                    return;
+                }
+                CreateSidecarPolicy(AssociateSidecars, SidecarExtensionsText);
+                SetMessage("プリセットを適用しました。再スキャンしてください。", Brushes.DimGray);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                       ex is ArgumentException || ex is InvalidOperationException ||
+                                       ex is NotSupportedException)
+            {
+                SetMessage("プリセットを適用しましたが、設定にエラーがあります。 " + ex.Message,
+                    Brushes.Firebrick);
+            }
+        }
+
+        private void ReloadPresets(Guid? selectedId, bool showWarning, bool resetUnselectedBaseline = false)
+        {
+            var result = _presetStore.Load();
+            var selectedWasRemoved = selectedId.HasValue && result.Presets.All(item => item.Id != selectedId.Value);
+            ReplacePresets(result.Presets, selectedId, resetUnselectedBaseline || selectedWasRemoved);
+            if (showWarning && !string.IsNullOrEmpty(result.Warning))
+                SetMessage(result.Warning, Brushes.DarkGoldenrod);
+        }
+
+        private void ReplacePresets(
+            IEnumerable<PhotoImporterPreset> presets,
+            Guid? selectedId,
+            bool resetUnselectedBaseline)
+        {
+            _suppressPresetSelection = true;
+            try
+            {
+                Presets.Clear();
+                foreach (var preset in presets.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                    Presets.Add(preset);
+                var selected = selectedId.HasValue
+                    ? Presets.FirstOrDefault(item => item.Id == selectedId.Value)
+                    : null;
+                SelectedPreset = selected;
+                if (selected == null && resetUnselectedBaseline)
+                    _unselectedPresetBaseline = CapturePresetSnapshot();
+                if (PresetSelector != null) PresetSelector.SelectedItem = selected;
+            }
+            finally
+            {
+                _suppressPresetSelection = false;
+            }
+            NotifyPresetStateChanged();
+        }
+
+        private void SetSelectedPresetWithoutApplying(PhotoImporterPreset preset)
+        {
+            _suppressPresetSelection = true;
+            try
+            {
+                SelectedPreset = preset;
+                if (PresetSelector != null) PresetSelector.SelectedItem = preset;
+            }
+            finally
+            {
+                _suppressPresetSelection = false;
+            }
+        }
+
+        private void NotifyPresetStateChanged()
+        {
+            OnPropertyChanged(nameof(HasPresetChanges));
+            OnPropertyChanged(nameof(PresetStatusText));
+            OnPropertyChanged(nameof(PresetStatusVisibility));
+            OnPropertyChanged(nameof(CanUndoPresetApply));
+            OnPropertyChanged(nameof(PresetUndoVisibility));
+        }
+
+        private void ShowPresetError(string title, Exception ex)
+        {
+            SetMessage(title + " " + ex.Message, Brushes.Firebrick);
+            MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private static bool IsPresetStoreFailure(Exception ex) =>
+            ex is IOException || ex is UnauthorizedAccessException || ex is InvalidDataException ||
+            ex is InvalidOperationException || ex is ArgumentException || ex is TimeoutException;
+
+        private void SettingsChanged(bool presetOwnedSetting = true)
         {
             _previewIsCurrent = false;
+            if (!_isApplyingPreset && presetOwnedSetting) _presetUndo = null;
             OnPropertyChanged(nameof(CanScan));
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(CanSelectAll));
             OnPropertyChanged(nameof(CanEditFilters));
             OnPropertyChanged(nameof(CanApplyFilter));
+            NotifyPresetStateChanged();
         }
 
         private void ChangeExifCacheRoot(string newRoot, bool useDefault)
@@ -1534,7 +2279,7 @@ namespace PhotoImporter.App
                     _customExifCacheRoot = null;
                     OnPropertyChanged(nameof(ExifCacheRoot));
                     NotifyExifSettingsSummaryChanged();
-                    SettingsChanged();
+                    SettingsChanged(false);
                     SetMessage("Exif キャッシュの保存先を既定値へ戻しました。", Brushes.DimGray);
                 }
                 return;
@@ -1570,7 +2315,7 @@ namespace PhotoImporter.App
             _customExifCacheRoot = useDefault ? null : normalizedNewRoot;
             OnPropertyChanged(nameof(ExifCacheRoot));
             NotifyExifSettingsSummaryChanged();
-            SettingsChanged();
+            SettingsChanged(false);
             SetMessage("Exif キャッシュの保存先を変更しました。", Brushes.DimGray);
         }
 
@@ -1611,6 +2356,7 @@ namespace PhotoImporter.App
             _readExifInformation = settings.ReadExifInformation;
             _showImagePreview = settings.ShowImagePreview;
             _customExifCacheRoot = settings.CustomExifCacheRoot;
+            _lastAppliedPresetId = settings.LastAppliedPresetId;
             _previousExifCacheRoots.Clear();
             _previousExifCacheRoots.AddRange(settings.PreviousExifCacheRoots);
             _previousExifCacheRoots.RemoveAll(
@@ -1629,13 +2375,8 @@ namespace PhotoImporter.App
             }
             catch (ArgumentException ex)
             {
+                if (PresetDialogs.ConfirmExitWithoutSaving(this, ex.Message)) return;
                 e.Cancel = true;
-                MessageBox.Show(
-                    this,
-                    ex.Message,
-                    "サイドカー拡張子",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
                 return;
             }
 
@@ -1651,7 +2392,8 @@ namespace PhotoImporter.App
                 UseExifCache = UseExifCache,
                 ReadExifInformation = ReadExifInformation,
                 ShowImagePreview = ShowImagePreview,
-                CustomExifCacheRoot = _customExifCacheRoot
+                CustomExifCacheRoot = _customExifCacheRoot,
+                LastAppliedPresetId = SelectedPreset?.Id
             };
             settings.SidecarExtensions.Clear();
             foreach (var extension in sidecarPolicy.Extensions)
@@ -1687,6 +2429,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(ProgressVisibility));
             OnPropertyChanged(nameof(CanEditFilters));
             OnPropertyChanged(nameof(CanApplyFilter));
+            OnPropertyChanged(nameof(CanUndoPresetApply));
             if (!copying && !_isScanningExif) ProgressText = string.Empty;
         }
 
@@ -1770,6 +2513,23 @@ namespace PhotoImporter.App
 
         private void OnPropertyChanged([CallerMemberName] string name = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        private sealed class PresetUndoState
+        {
+            public PresetUndoState(
+                PresetSettingsSnapshot settings,
+                Guid? selectedPresetId,
+                PresetSettingsSnapshot unselectedBaseline)
+            {
+                Settings = settings;
+                SelectedPresetId = selectedPresetId;
+                UnselectedBaseline = unselectedBaseline;
+            }
+
+            public PresetSettingsSnapshot Settings { get; }
+            public Guid? SelectedPresetId { get; }
+            public PresetSettingsSnapshot UnselectedBaseline { get; }
+        }
     }
 
     public sealed class TokenDetailItem : INotifyPropertyChanged

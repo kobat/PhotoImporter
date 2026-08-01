@@ -37,6 +37,7 @@ namespace PhotoImporter.Core.Settings
         public bool ReadExifInformation { get; set; }
         public bool ShowImagePreview { get; set; }
         public string CustomExifCacheRoot { get; set; }
+        public Guid? LastAppliedPresetId { get; set; }
         public IList<string> SidecarExtensions { get; }
         public IList<string> PreviousExifCacheRoots { get; }
 
@@ -96,7 +97,8 @@ namespace PhotoImporter.Core.Settings
                     UseExifCache = ReadBoolean(root, "UseExifCache", true),
                     ReadExifInformation = ReadBoolean(root, "ReadExifInformation", false),
                     ShowImagePreview = ReadBoolean(root, "ShowImagePreview", false),
-                    CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot"))
+                    CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot")),
+                    LastAppliedPresetId = ReadOptionalGuid(root, "LastAppliedPresetId")
                 };
 
                 var sidecarExtensions = root.Element("SidecarExtensions");
@@ -170,6 +172,10 @@ namespace PhotoImporter.Core.Settings
                         new XElement("UseExifCache", settings.UseExifCache),
                         new XElement("ReadExifInformation", settings.ReadExifInformation),
                         new XElement("ShowImagePreview", settings.ShowImagePreview),
+                        new XElement("LastAppliedPresetId",
+                            settings.LastAppliedPresetId.HasValue
+                                ? settings.LastAppliedPresetId.Value.ToString("D")
+                                : string.Empty),
                         new XElement("CustomExifCacheRoot", settings.CustomExifCacheRoot ?? string.Empty),
                         new XElement("PreviousExifCacheRoots",
                             settings.PreviousExifCacheRoots
@@ -226,6 +232,14 @@ namespace PhotoImporter.Core.Settings
                    Enum.IsDefined(typeof(T), value)
                 ? value
                 : defaultValue;
+        }
+
+        private static Guid? ReadOptionalGuid(XElement root, string name)
+        {
+            var text = ReadOptional(root, name);
+            if (text == null) return null;
+            Guid value;
+            return Guid.TryParse(text, out value) && value != Guid.Empty ? value : (Guid?)null;
         }
 
         private static string NormalizeOptionalAbsolutePath(string path)

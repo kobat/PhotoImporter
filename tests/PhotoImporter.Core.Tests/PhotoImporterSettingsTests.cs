@@ -26,6 +26,7 @@ namespace PhotoImporter.Core.Tests
             Assert.False(settings.ReadExifInformation);
             Assert.False(settings.ShowImagePreview);
             Assert.Null(settings.CustomExifCacheRoot);
+            Assert.Null(settings.LastAppliedPresetId);
             Assert.Empty(settings.PreviousExifCacheRoots);
         }
 
@@ -48,7 +49,8 @@ namespace PhotoImporter.Core.Tests
                 UseExifCache = false,
                 ReadExifInformation = true,
                 ShowImagePreview = true,
-                CustomExifCacheRoot = customCache
+                CustomExifCacheRoot = customCache,
+                LastAppliedPresetId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef")
             };
             settings.PreviousExifCacheRoots.Add(previousCache);
             settings.PreviousExifCacheRoots.Add(previousCache.ToUpperInvariant());
@@ -71,6 +73,7 @@ namespace PhotoImporter.Core.Tests
             Assert.True(loaded.ReadExifInformation);
             Assert.True(loaded.ShowImagePreview);
             Assert.Equal(Path.GetFullPath(customCache), loaded.CustomExifCacheRoot);
+            Assert.Equal(settings.LastAppliedPresetId, loaded.LastAppliedPresetId);
             Assert.Single(loaded.PreviousExifCacheRoots);
             Assert.Equal(Path.GetFullPath(previousCache), loaded.PreviousExifCacheRoots[0], ignoreCase: true);
         }
