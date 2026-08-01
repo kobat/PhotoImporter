@@ -51,7 +51,21 @@ namespace PhotoImporter.App
             bool includeSidecarCandidates,
             System.Threading.CancellationToken cancellationToken)
         {
+            return Enumerate(
+                sourceRoot,
+                selectionMode,
+                includeSidecarCandidates ? SidecarPolicy.Default : SidecarPolicy.Disabled,
+                cancellationToken);
+        }
+
+        public SourceScanResult Enumerate(
+            string sourceRoot,
+            SourceFileSelectionMode selectionMode,
+            SidecarPolicy sidecarPolicy,
+            System.Threading.CancellationToken cancellationToken)
+        {
             if (sourceRoot == null) throw new ArgumentNullException(nameof(sourceRoot));
+            if (sidecarPolicy == null) throw new ArgumentNullException(nameof(sidecarPolicy));
             if (!Enum.IsDefined(typeof(SourceFileSelectionMode), selectionMode))
                 throw new ArgumentOutOfRangeException(nameof(selectionMode));
             var result = new SourceScanResult();
@@ -88,7 +102,7 @@ namespace PhotoImporter.App
                                 pending.Push(entry.FullPath);
                         }
                         else if (!ExcludedFileNames.Contains(entry.Name) &&
-                                 ShouldInclude(entry.FullPath, selectionMode, includeSidecarCandidates))
+                                 ShouldInclude(entry.FullPath, selectionMode, sidecarPolicy))
                         {
                             result.Files.Add(entry.FullPath);
                         }
@@ -108,9 +122,9 @@ namespace PhotoImporter.App
         private static bool ShouldInclude(
             string path,
             SourceFileSelectionMode selectionMode,
-            bool includeSidecarCandidates)
+            SidecarPolicy sidecarPolicy)
         {
-            if (includeSidecarCandidates && SidecarAssociationPlan.IsSidecarCandidate(path))
+            if (sidecarPolicy.IsCandidate(path))
                 return true;
             switch (selectionMode)
             {

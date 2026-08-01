@@ -37,6 +37,7 @@ namespace PhotoImporter.App
         private bool _overwriteExisting;
         private SourceFileSelectionMode _sourceFileSelectionMode = SourceFileSelectionMode.MediaOnly;
         private bool _associateSidecars;
+        private string _sidecarExtensionsText = ".xmp";
         private bool _analyzeJpegOnlyForRawJpegPair = true;
         private bool _useExifCache = true;
         private bool _readExifInformation;
@@ -172,6 +173,39 @@ namespace PhotoImporter.App
             set { if (Set(ref _associateSidecars, value)) SettingsChanged(); }
         }
 
+        public string SidecarExtensionsText
+        {
+            get => _sidecarExtensionsText;
+            set
+            {
+                if (!Set(ref _sidecarExtensionsText, value)) return;
+                OnPropertyChanged(nameof(SidecarExtensionsError));
+                OnPropertyChanged(nameof(SidecarExtensionsErrorVisibility));
+                SettingsChanged();
+            }
+        }
+
+        public string SidecarExtensionsError
+        {
+            get
+            {
+                try
+                {
+                    CreateSidecarPolicy(true, SidecarExtensionsText);
+                    return string.Empty;
+                }
+                catch (ArgumentException ex)
+                {
+                    return ex.Message;
+                }
+            }
+        }
+
+        public Visibility SidecarExtensionsErrorVisibility =>
+            string.IsNullOrEmpty(SidecarExtensionsError)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
         public bool ReadExifInformation
         {
             get => _readExifInformation;
@@ -265,7 +299,8 @@ namespace PhotoImporter.App
         public bool CanCancel => _isCopying || _isScanningExif;
         public bool CanScan => !_isBusy && !string.IsNullOrWhiteSpace(SourceFolder) &&
                                !string.IsNullOrWhiteSpace(DestinationFolder) &&
-                               !string.IsNullOrWhiteSpace(TemplateText);
+                               !string.IsNullOrWhiteSpace(TemplateText) &&
+                               string.IsNullOrEmpty(SidecarExtensionsError);
         public bool CanCopy => !_isBusy && _previewIsCurrent && _itemCollectionState.CopyTargets.Any();
         public bool CanEditFilters => !_isBusy && _previewIsCurrent;
         public bool CanApplyFilter => CanEditFilters && FilterConditions.All(item => item.IsValid);
@@ -547,7 +582,9 @@ namespace PhotoImporter.App
                 }
                 var overwrite = OverwriteExisting;
                 var sourceFileSelectionMode = _sourceFileSelectionMode;
-                var associateSidecars = AssociateSidecars;
+                var sidecarPolicy = CreateSidecarPolicy(
+                    AssociateSidecars,
+                    SidecarExtensionsText);
                 var rawJpegAnalysisMode = AnalyzeJpegOnlyForRawJpegPair
                     ? RawJpegAnalysisMode.JpegOnlyForPair
                     : RawJpegAnalysisMode.AnalyzeBoth;
@@ -579,7 +616,7 @@ namespace PhotoImporter.App
                     parseResult.Template,
                     overwrite,
                     sourceFileSelectionMode,
-                    associateSidecars,
+                    sidecarPolicy,
                     rawJpegAnalysisMode,
                     useExifCache,
                     shouldReadExif,
@@ -858,7 +895,7 @@ namespace PhotoImporter.App
             ParsedTemplate template,
             bool overwriteExisting,
             SourceFileSelectionMode sourceFileSelectionMode,
-            bool associateSidecars,
+            SidecarPolicy sidecarPolicy,
             RawJpegAnalysisMode rawJpegAnalysisMode,
             bool useExifCache,
             bool readExifInformation,
@@ -867,6 +904,8 @@ namespace PhotoImporter.App
             CancellationToken cancellationToken = default(CancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (sidecarPolicy == null) throw new ArgumentNullException(nameof(sidecarPolicy));
+            var associateSidecars = sidecarPolicy.Enabled;
             var result = new List<PreviewItem>();
             var warnings = new List<string>();
             var destinationVolume = new WindowsVolumeInfoReader().Read(destinationRoot);
@@ -887,15 +926,12 @@ namespace PhotoImporter.App
             var scan = new SourceFileEnumerator().Enumerate(
                 sourceRoot,
                 sourceFileSelectionMode,
-                associateSidecars,
+                sidecarPolicy,
                 cancellationToken);
             foreach (var issue in scan.Issues)
                 result.Add(PreviewItem.ForScanError(issue.Path, issue.Message));
 
-            var sidecarPlan = SidecarAssociationPlan.Create(
-                associateSidecars
-                    ? (IEnumerable<string>)scan.Files
-                    : new string[0]);
+            var sidecarPlan = SidecarAssociationPlan.Create(scan.Files, sidecarPolicy);
             warnings.AddRange(sidecarPlan.Warnings);
             var files = scan.Files.Where(path =>
                 sourceFileSelectionMode == SourceFileSelectionMode.AllFiles ||
@@ -1020,7 +1056,8 @@ namespace PhotoImporter.App
                                 IsBlockedByDestinationOnlySidecar(
                                     candidate,
                                     sourceSidecars,
-                                    destinationLookup);
+                                    destinationLookup,
+                                    sidecarPolicy);
                         }
                         allocation = allocator.Allocate(
                             context,
@@ -1090,7 +1127,8 @@ namespace PhotoImporter.App
         private static bool IsBlockedByDestinationOnlySidecar(
             string imageRelativePath,
             IReadOnlyList<SidecarAssociation> sourceSidecars,
-            IDestinationFileLookup destinationLookup)
+            IDestinationFileLookup destinationLookup,
+            SidecarPolicy sidecarPolicy)
         {
             var representedPaths = new HashSet<string>(
                 sourceSidecars.Select(sidecar => SidecarDestinationPath.Derive(
@@ -1098,7 +1136,9 @@ namespace PhotoImporter.App
                     sidecar.SidecarPath,
                     sidecar.NamingStyle)),
                 StringComparer.OrdinalIgnoreCase);
-            foreach (var potentialPath in SidecarDestinationPath.GetPotentialXmpPaths(imageRelativePath))
+            foreach (var potentialPath in SidecarDestinationPath.GetPotentialSidecarPaths(
+                         imageRelativePath,
+                         sidecarPolicy))
             {
                 if (representedPaths.Contains(potentialPath)) continue;
                 DestinationFileSnapshot ignored;
@@ -1565,6 +1605,7 @@ namespace PhotoImporter.App
             _overwriteExisting = settings.OverwriteExisting;
             _sourceFileSelectionMode = settings.SourceFileSelectionMode;
             _associateSidecars = settings.AssociateSidecars;
+            _sidecarExtensionsText = string.Join("; ", settings.SidecarExtensions);
             _analyzeJpegOnlyForRawJpegPair = settings.AnalyzeJpegOnlyForRawJpegPair;
             _useExifCache = settings.UseExifCache;
             _readExifInformation = settings.ReadExifInformation;
@@ -1579,6 +1620,25 @@ namespace PhotoImporter.App
         private void MainWindow_Closing(object sender, CancelEventArgs e)
         {
             CancelImagePreviewRequest();
+            SidecarPolicy sidecarPolicy;
+            try
+            {
+                sidecarPolicy = CreateSidecarPolicy(
+                    AssociateSidecars,
+                    SidecarExtensionsText);
+            }
+            catch (ArgumentException ex)
+            {
+                e.Cancel = true;
+                MessageBox.Show(
+                    this,
+                    ex.Message,
+                    "サイドカー拡張子",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             var settings = new PhotoImporterSettings
             {
                 SourceFolder = SourceFolder,
@@ -1593,6 +1653,9 @@ namespace PhotoImporter.App
                 ShowImagePreview = ShowImagePreview,
                 CustomExifCacheRoot = _customExifCacheRoot
             };
+            settings.SidecarExtensions.Clear();
+            foreach (var extension in sidecarPolicy.Extensions)
+                settings.SidecarExtensions.Add(extension);
             foreach (var path in _previousExifCacheRoots) settings.PreviousExifCacheRoots.Add(path);
 
             try
@@ -1633,6 +1696,14 @@ namespace PhotoImporter.App
             if (!Directory.Exists(destinationRoot)) throw new DirectoryNotFoundException("コピー先フォルダーが見つかりません。");
             if (IsSameOrUnder(sourceRoot, destinationRoot) || IsSameOrUnder(destinationRoot, sourceRoot))
                 throw new InvalidOperationException("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
+        }
+
+        private static SidecarPolicy CreateSidecarPolicy(bool enabled, string extensionText)
+        {
+            var extensions = (extensionText ?? string.Empty).Split(
+                new[] { ';', ',', ' ', '\t', '\r', '\n' },
+                StringSplitOptions.RemoveEmptyEntries);
+            return SidecarPolicy.Create(enabled, extensions);
         }
 
         private static string SelectFolder(string initialPath, string description)
@@ -2037,7 +2108,7 @@ namespace PhotoImporter.App
                 else if (Warnings.Contains(TemplateWarningCode.TakenDateOffsetMissing))
                     status += "（Exif時差なし）";
                 if (Warnings.Contains(TemplateWarningCode.OrphanSidecarForcedSequence))
-                    status += "（孤立XMPを避けて連番を使用）";
+                    status += "（孤立サイドカーを避けて連番を使用）";
                 return status;
             }
         }

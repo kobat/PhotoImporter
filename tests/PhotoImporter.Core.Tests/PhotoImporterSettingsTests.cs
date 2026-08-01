@@ -20,6 +20,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(PhotoImporterSettings.DefaultTemplate, settings.TemplateText);
             Assert.Equal(SourceFileSelectionMode.MediaOnly, settings.SourceFileSelectionMode);
             Assert.False(settings.AssociateSidecars);
+            Assert.Equal(new[] { ".xmp" }, settings.SidecarExtensions);
             Assert.True(settings.AnalyzeJpegOnlyForRawJpegPair);
             Assert.True(settings.UseExifCache);
             Assert.False(settings.ReadExifInformation);
@@ -51,6 +52,9 @@ namespace PhotoImporter.Core.Tests
             };
             settings.PreviousExifCacheRoots.Add(previousCache);
             settings.PreviousExifCacheRoots.Add(previousCache.ToUpperInvariant());
+            settings.SidecarExtensions.Clear();
+            settings.SidecarExtensions.Add("XMP");
+            settings.SidecarExtensions.Add(".pp3");
 
             store.Save(settings);
             var loaded = store.Load();
@@ -61,6 +65,7 @@ namespace PhotoImporter.Core.Tests
             Assert.True(loaded.OverwriteExisting);
             Assert.Equal(SourceFileSelectionMode.AllFiles, loaded.SourceFileSelectionMode);
             Assert.True(loaded.AssociateSidecars);
+            Assert.Equal(new[] { ".xmp", ".pp3" }, loaded.SidecarExtensions);
             Assert.False(loaded.AnalyzeJpegOnlyForRawJpegPair);
             Assert.False(loaded.UseExifCache);
             Assert.True(loaded.ReadExifInformation);
@@ -95,6 +100,41 @@ namespace PhotoImporter.Core.Tests
             var settings = store.Load();
 
             Assert.Null(settings.CustomExifCacheRoot);
+        }
+
+        [Fact]
+        public void MissingSidecarExtensionsUsesXmpForBackwardCompatibility()
+        {
+            Directory.CreateDirectory(_root);
+            var settingsPath = Path.Combine(_root, "settings.xml");
+            File.WriteAllText(
+                settingsPath,
+                "<PhotoImporterSettings version=\"1\">" +
+                "<AssociateSidecars>true</AssociateSidecars>" +
+                "</PhotoImporterSettings>");
+            var store = new PhotoImporterSettingsStore(settingsPath);
+
+            var settings = store.Load();
+
+            Assert.True(settings.AssociateSidecars);
+            Assert.Equal(new[] { ".xmp" }, settings.SidecarExtensions);
+        }
+
+        [Fact]
+        public void InvalidSidecarExtensionInSettingsIsReported()
+        {
+            Directory.CreateDirectory(_root);
+            var settingsPath = Path.Combine(_root, "settings.xml");
+            File.WriteAllText(
+                settingsPath,
+                "<PhotoImporterSettings version=\"1\">" +
+                "<SidecarExtensions><Extension>.jpg</Extension></SidecarExtensions>" +
+                "</PhotoImporterSettings>");
+            var store = new PhotoImporterSettingsStore(settingsPath);
+
+            var error = Assert.Throws<InvalidDataException>(() => store.Load());
+
+            Assert.Contains("読み込めません", error.Message);
         }
 
         [Fact]

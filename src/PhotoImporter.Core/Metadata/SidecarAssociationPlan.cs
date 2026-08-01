@@ -31,9 +31,6 @@ namespace PhotoImporter.Core.Metadata
 
     public sealed class SidecarAssociationPlan
     {
-        private static readonly HashSet<string> SidecarExtensions = new HashSet<string>(
-            new[] { ".xmp" },
-            StringComparer.OrdinalIgnoreCase);
         private readonly IReadOnlyDictionary<string, SidecarAssociation> _bySidecar;
         private readonly IReadOnlyDictionary<string, IReadOnlyList<SidecarAssociation>> _byImage;
 
@@ -52,7 +49,13 @@ namespace PhotoImporter.Core.Metadata
         public IReadOnlyList<string> Warnings { get; }
 
         public static bool IsSidecarCandidate(string path) =>
-            path != null && SidecarExtensions.Contains(Path.GetExtension(path));
+            SidecarPolicy.Default.IsCandidate(path);
+
+        public static bool IsSidecarCandidate(string path, SidecarPolicy policy)
+        {
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
+            return policy.IsCandidate(path);
+        }
 
         public bool TryGetAssociation(string sidecarPath, out SidecarAssociation association) =>
             _bySidecar.TryGetValue(sidecarPath, out association);
@@ -67,7 +70,15 @@ namespace PhotoImporter.Core.Metadata
 
         public static SidecarAssociationPlan Create(IEnumerable<string> paths)
         {
+            return Create(paths, SidecarPolicy.Default);
+        }
+
+        public static SidecarAssociationPlan Create(
+            IEnumerable<string> paths,
+            SidecarPolicy policy)
+        {
             if (paths == null) throw new ArgumentNullException(nameof(paths));
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
             var allPaths = paths.ToList();
             if (allPaths.Any(path => path == null))
                 throw new ArgumentException("Paths cannot contain null.", nameof(paths));
@@ -84,7 +95,7 @@ namespace PhotoImporter.Core.Metadata
             var mutableByImage = new Dictionary<string, List<SidecarAssociation>>(StringComparer.OrdinalIgnoreCase);
             var warnings = new List<string>();
 
-            foreach (var sidecar in allPaths.Where(IsSidecarCandidate))
+            foreach (var sidecar in allPaths.Where(policy.IsCandidate))
             {
                 var directory = Path.GetDirectoryName(sidecar) ?? string.Empty;
                 List<string> directoryImages;
@@ -191,18 +202,26 @@ namespace PhotoImporter.Core.Metadata
             return Path.Combine(directory, baseName + sidecarExtension);
         }
 
-        public static IReadOnlyList<string> GetPotentialXmpPaths(string imageRelativePath)
+        public static IReadOnlyList<string> GetPotentialSidecarPaths(
+            string imageRelativePath,
+            SidecarPolicy policy)
         {
             if (string.IsNullOrWhiteSpace(imageRelativePath))
                 throw new ArgumentException("The image destination path is required.", nameof(imageRelativePath));
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
             var directory = Path.GetDirectoryName(imageRelativePath) ?? string.Empty;
             var imageName = Path.GetFileName(imageRelativePath);
             var stem = Path.GetFileNameWithoutExtension(imageName);
-            return new[]
-            {
-                Path.Combine(directory, stem + ".xmp"),
-                Path.Combine(directory, imageName + ".xmp")
-            }.Distinct(StringComparer.OrdinalIgnoreCase).ToList().AsReadOnly();
+            if (!policy.Enabled) return new string[0];
+            return policy.Extensions
+                .SelectMany(extension => new[]
+                {
+                    Path.Combine(directory, stem + extension),
+                    Path.Combine(directory, imageName + extension)
+                })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                .AsReadOnly();
         }
     }
 }

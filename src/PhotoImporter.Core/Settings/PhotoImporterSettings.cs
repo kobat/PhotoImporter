@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using PhotoImporter.Core.Metadata;
 
 namespace PhotoImporter.Core.Settings
 {
@@ -21,6 +22,7 @@ namespace PhotoImporter.Core.Settings
             UseExifCache = true;
             ReadExifInformation = false;
             ShowImagePreview = false;
+            SidecarExtensions = new List<string> { ".xmp" };
             PreviousExifCacheRoots = new List<string>();
         }
 
@@ -35,6 +37,7 @@ namespace PhotoImporter.Core.Settings
         public bool ReadExifInformation { get; set; }
         public bool ShowImagePreview { get; set; }
         public string CustomExifCacheRoot { get; set; }
+        public IList<string> SidecarExtensions { get; }
         public IList<string> PreviousExifCacheRoots { get; }
 
         public string ResolveExifCacheRoot(string applicationBaseDirectory)
@@ -96,6 +99,17 @@ namespace PhotoImporter.Core.Settings
                     CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot"))
                 };
 
+                var sidecarExtensions = root.Element("SidecarExtensions");
+                if (sidecarExtensions != null)
+                {
+                    var policy = SidecarPolicy.Create(
+                        settings.AssociateSidecars,
+                        sidecarExtensions.Elements("Extension").Select(item => item.Value));
+                    settings.SidecarExtensions.Clear();
+                    foreach (var extension in policy.Extensions)
+                        settings.SidecarExtensions.Add(extension);
+                }
+
                 var previousRoots = root.Element("PreviousExifCacheRoots");
                 if (previousRoots != null)
                 {
@@ -124,6 +138,9 @@ namespace PhotoImporter.Core.Settings
         public void Save(PhotoImporterSettings settings)
         {
             if (settings == null) throw new ArgumentNullException(nameof(settings));
+            var sidecarPolicy = SidecarPolicy.Create(
+                settings.AssociateSidecars,
+                settings.SidecarExtensions);
 
             var directory = Path.GetDirectoryName(_settingsPath);
             if (string.IsNullOrEmpty(directory))
@@ -146,6 +163,9 @@ namespace PhotoImporter.Core.Settings
                         new XElement("OverwriteExisting", settings.OverwriteExisting),
                         new XElement("SourceFileSelectionMode", settings.SourceFileSelectionMode),
                         new XElement("AssociateSidecars", settings.AssociateSidecars),
+                        new XElement("SidecarExtensions",
+                            sidecarPolicy.Extensions.Select(extension =>
+                                new XElement("Extension", extension))),
                         new XElement("AnalyzeJpegOnlyForRawJpegPair", settings.AnalyzeJpegOnlyForRawJpegPair),
                         new XElement("UseExifCache", settings.UseExifCache),
                         new XElement("ReadExifInformation", settings.ReadExifInformation),

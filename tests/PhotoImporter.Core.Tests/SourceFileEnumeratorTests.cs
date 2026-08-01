@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using PhotoImporter.App;
+using PhotoImporter.Core.Metadata;
 using PhotoImporter.Core.Settings;
 using Xunit;
 
@@ -67,6 +68,27 @@ namespace PhotoImporter.Core.Tests
 
             Assert.Equal(
                 new[] { @"E:\photo.jpg", @"E:\photo.xmp" },
+                result.Files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public void ConfiguredSidecarCandidateCanBeCollectedWithoutIncludingOtherFiles()
+        {
+            var root = @"E:\";
+            var fileSystem = new FakeSourceFileSystem(root)
+                .AddFile(root, "photo.jpg")
+                .AddFile(root, "photo.pp3")
+                .AddFile(root, "notes.txt");
+            var policy = SidecarPolicy.Create(true, new[] { ".pp3" });
+
+            var result = new SourceFileEnumerator(fileSystem).Enumerate(
+                root,
+                SourceFileSelectionMode.MediaOnly,
+                policy,
+                CancellationToken.None);
+
+            Assert.Equal(
+                new[] { @"E:\photo.jpg", @"E:\photo.pp3" },
                 result.Files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
         }
 

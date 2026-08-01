@@ -150,10 +150,27 @@
                 <CheckBox Content="画像・動画以外のファイルも含める"
                           IsChecked="{Binding IncludeOtherFiles}"
                           ToolTip="有効にすると、既知のシステム管理項目を除くすべての通常ファイルをコピー対象としてスキャンします。" />
-                <CheckBox Content="同名のXMPサイドカーを画像に関連付ける"
+                <CheckBox Content="同名のサイドカーファイルを画像に関連付ける"
                           Margin="0,6,0,0"
                           IsChecked="{Binding AssociateSidecars}"
-                          ToolTip="画像と同じフォルダー・同じ名前のXMPを、画像のコピー先名と連番へ追従させます。" />
+                          ToolTip="画像と同じフォルダー・同じ名前の対象ファイルを、画像のコピー先名と連番へ追従させます。" />
+                <Grid Margin="20,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="84" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="対象拡張子" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1"
+                             Text="{Binding SidecarExtensionsText, UpdateSourceTrigger=PropertyChanged}"
+                             Padding="4,2"
+                             AutomationProperties.AutomationId="SidecarExtensions"
+                             ToolTip="セミコロン、カンマ、または空白で区切ります。例: xmp; aae; pp3" />
+                </Grid>
+                <TextBlock Text="{Binding SidecarExtensionsError}"
+                           Visibility="{Binding SidecarExtensionsErrorVisibility}"
+                           Margin="104,2,0,0"
+                           Foreground="Firebrick"
+                           TextWrapping="Wrap" />
                 <CheckBox Content="RAW+JPEGペアではJPEGのみ解析する"
                           Margin="0,6,0,0"
                           IsChecked="{Binding AnalyzeJpegOnlyForRawJpegPair}" />
