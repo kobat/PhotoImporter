@@ -3,14 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Photo Importer バージョン情報"
         Icon="Assets/PhotoImporter.ico"
-        Width="520" SizeToContent="Height"
+        Width="480" SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
     <Grid Margin="24">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -31,38 +29,20 @@
             </StackPanel>
         </Grid>
 
-        <TextBlock Grid.Row="1" Margin="0,20,0,0" TextWrapping="Wrap"
-                   Text="SDカードやCFexpressカードなどから、写真や関連ファイルを確認しながら取り込むWindows 11向けアプリです。" />
-
-        <Border Grid.Row="2" Margin="0,18,0,0" Padding="12"
-                Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
-                CornerRadius="4">
-            <TextBlock TextWrapping="Wrap"
-                       Text="写真、Exif情報、設定、キャッシュ、エラーログはローカルで処理します。自動更新確認、テレメトリ、クラッシュレポート送信は行いません。下のリンクは、利用者が選択した場合だけ既定のブラウザーで開きます。" />
-        </Border>
-
-        <Grid Grid.Row="3" Margin="0,22,0,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <StackPanel Orientation="Horizontal">
-                <Button Content="ソースコード" Click="OpenSource_Click"
-                        AutomationProperties.Name="GitHubでソースコードを開く" />
-                <Button Content="最新版" Margin="8,0,0,0"
-                        Click="OpenReleases_Click"
-                        AutomationProperties.Name="GitHub Releasesで最新版を開く" />
-                <Button Content="不具合を報告" Margin="8,0,0,0"
-                        Click="OpenIssues_Click"
-                        AutomationProperties.Name="GitHub Issuesで不具合を報告する" />
-            </StackPanel>
-            <Grid Grid.Row="1" Margin="0,12,0,0">
-                <Button HorizontalAlignment="Left" Content="ライセンス情報..."
-                        Click="OpenLicenseInformation_Click"
-                        AutomationProperties.Name="ライセンス情報を表示する" />
-                <Button HorizontalAlignment="Right" Content="閉じる" MinWidth="88"
-                        IsDefault="True" IsCancel="True" />
-            </Grid>
+        <Grid Grid.Row="1" Margin="0,22,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button Content="GitHub リポジトリ" Click="OpenRepository_Click"
+                    AutomationProperties.Name="GitHubでリポジトリを開く" />
+            <Button Grid.Column="1" Margin="8,0,0,0" Content="ライセンス情報..."
+                    Click="OpenLicenseInformation_Click"
+                    AutomationProperties.Name="ライセンス情報を表示する" />
+            <Button Grid.Column="3" Content="閉じる" MinWidth="88"
+                    IsDefault="True" IsCancel="True" />
         </Grid>
     </Grid>
 </Window>

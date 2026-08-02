@@ -9,8 +9,6 @@ namespace PhotoImporter.App
     public partial class AboutWindow : Window
     {
         private const string RepositoryUrl = "https://github.com/kobat/PhotoImporter";
-        private const string ReleasesUrl = RepositoryUrl + "/releases";
-        private const string IssuesUrl = RepositoryUrl + "/issues";
 
         public AboutWindow()
         {
@@ -32,9 +30,7 @@ namespace PhotoImporter.App
                 : attribute.InformationalVersion;
         }
 
-        private void OpenSource_Click(object sender, RoutedEventArgs e) => OpenUrl(RepositoryUrl);
-        private void OpenReleases_Click(object sender, RoutedEventArgs e) => OpenUrl(ReleasesUrl);
-        private void OpenIssues_Click(object sender, RoutedEventArgs e) => OpenUrl(IssuesUrl);
+        private void OpenRepository_Click(object sender, RoutedEventArgs e) => OpenUrl(RepositoryUrl);
 
         private void OpenLicenseInformation_Click(object sender, RoutedEventArgs e)
         {

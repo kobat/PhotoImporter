@@ -29,7 +29,19 @@
 
             <ListBox x:Name="LicenseList"
                      DisplayMemberPath="DisplayName"
-                     AutomationProperties.Name="ライセンスの対象" />
+                     AutomationProperties.Name="ライセンスの対象">
+                <ListBox.GroupStyle>
+                    <GroupStyle>
+                        <GroupStyle.HeaderTemplate>
+                            <DataTemplate>
+                                <TextBlock Margin="8,12,8,5"
+                                           Text="{Binding Name}"
+                                           FontWeight="SemiBold" />
+                            </DataTemplate>
+                        </GroupStyle.HeaderTemplate>
+                    </GroupStyle>
+                </ListBox.GroupStyle>
+            </ListBox>
 
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
@@ -53,8 +65,6 @@
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,16,0,0">
-            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
-                       Text="この情報はオフラインで表示されます。" />
             <Button HorizontalAlignment="Right" Content="閉じる" MinWidth="88"
                     IsDefault="True" IsCancel="True" />
         </Grid>

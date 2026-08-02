@@ -12,10 +12,22 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(5, LicenseInformationCatalog.Items.Count);
             Assert.All(LicenseInformationCatalog.Items, item =>
             {
+                Assert.False(string.IsNullOrWhiteSpace(item.Category));
                 Assert.False(string.IsNullOrWhiteSpace(item.DisplayName));
                 Assert.False(string.IsNullOrWhiteSpace(item.Summary));
                 Assert.True(item.LicenseText.Length > 100);
             });
+        }
+
+        [Fact]
+        public void CatalogSeparatesApplicationFromThirdPartyLicenses()
+        {
+            var categories = LicenseInformationCatalog.Items
+                .GroupBy(item => item.Category)
+                .ToDictionary(group => group.Key, group => group.Count());
+
+            Assert.Equal(1, categories["このアプリのライセンス"]);
+            Assert.Equal(4, categories["第三者ライブラリのライセンス"]);
         }
 
         [Fact]
@@ -27,7 +39,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Contains(names, name => name.StartsWith("MetadataExtractor"));
             Assert.Contains(names, name => name.StartsWith("XmpCore"));
             Assert.Contains(names, name => name.Contains("Microsoft .NET"));
-            Assert.Contains(names, name => name.Contains("Microsoft 第三者通知"));
+            Assert.Contains(names, name => name.Contains("Microsoft 第三者ライブラリ"));
         }
     }
 }
