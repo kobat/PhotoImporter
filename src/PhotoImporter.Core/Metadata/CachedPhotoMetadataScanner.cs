@@ -1,20 +1,35 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 
 namespace PhotoImporter.Core.Metadata
 {
+    public enum PhotoMetadataScanPhase
+    {
+        Preparing,
+        Reading,
+        SavingCache,
+        Completed
+    }
+
     public sealed class PhotoMetadataScanProgress
     {
-        public PhotoMetadataScanProgress(int completedFiles, int totalFiles, int cacheHits)
+        public PhotoMetadataScanProgress(
+            PhotoMetadataScanPhase phase,
+            int completedFiles,
+            int totalFiles,
+            int cacheHits)
         {
+            Phase = phase;
             CompletedFiles = completedFiles;
             TotalFiles = totalFiles;
             CacheHits = cacheHits;
         }
 
+        public PhotoMetadataScanPhase Phase { get; }
         public int CompletedFiles { get; }
         public int TotalFiles { get; }
         public int CacheHits { get; }
@@ -63,6 +78,10 @@ namespace PhotoImporter.Core.Metadata
             var results = new Dictionary<string, PhotoMetadataReadResult>(StringComparer.OrdinalIgnoreCase);
             var warnings = new List<string>();
             var snapshots = new Dictionary<string, ExifFileSnapshot>(StringComparer.OrdinalIgnoreCase);
+            var progressReporter = new MetadataProgressReporter(
+                progress,
+                analysisPlan.AnalysisSources.Count);
+            progressReporter.ReportPhase(PhotoMetadataScanPhase.Preparing, 0, 0);
             foreach (var source in analysisPlan.AnalysisSources)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -92,7 +111,8 @@ namespace PhotoImporter.Core.Metadata
 
             var cacheHits = 0;
             var completed = 0;
-            progress?.Report(new PhotoMetadataScanProgress(0, analysisPlan.AnalysisSources.Count, 0));
+            var scanCompleted = false;
+            progressReporter.ReportReading(0, 0, true);
             try
             {
                 foreach (var source in analysisPlan.AnalysisSources)
@@ -101,8 +121,7 @@ namespace PhotoImporter.Core.Metadata
                     if (results.ContainsKey(source))
                     {
                         completed++;
-                        progress?.Report(new PhotoMetadataScanProgress(
-                            completed, analysisPlan.AnalysisSources.Count, cacheHits));
+                        progressReporter.ReportReading(completed, cacheHits);
                         cancellationToken.ThrowIfCancellationRequested();
                         continue;
                     }
@@ -141,15 +160,19 @@ namespace PhotoImporter.Core.Metadata
 
                     results.Add(source, result);
                     completed++;
-                    progress?.Report(new PhotoMetadataScanProgress(
-                        completed, analysisPlan.AnalysisSources.Count, cacheHits));
+                    progressReporter.ReportReading(completed, cacheHits);
                     cancellationToken.ThrowIfCancellationRequested();
                 }
+                scanCompleted = true;
             }
             finally
             {
                 if (cacheSession != null)
                 {
+                    progressReporter.ReportPhase(
+                        PhotoMetadataScanPhase.SavingCache,
+                        completed,
+                        cacheHits);
                     try
                     {
                         cacheSession.Dispose();
@@ -164,7 +187,55 @@ namespace PhotoImporter.Core.Metadata
                 }
             }
 
+            if (scanCompleted)
+                progressReporter.ReportPhase(
+                    PhotoMetadataScanPhase.Completed,
+                    completed,
+                    cacheHits);
+
             return new PhotoMetadataScanResult(results, warnings, cacheHits);
+        }
+
+        private sealed class MetadataProgressReporter
+        {
+            private static readonly TimeSpan MinimumReportInterval = TimeSpan.FromMilliseconds(75);
+            private readonly IProgress<PhotoMetadataScanProgress> _progress;
+            private readonly int _totalFiles;
+            private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+            private TimeSpan _lastReadingReport = TimeSpan.MinValue;
+
+            public MetadataProgressReporter(
+                IProgress<PhotoMetadataScanProgress> progress,
+                int totalFiles)
+            {
+                _progress = progress;
+                _totalFiles = totalFiles;
+            }
+
+            public void ReportReading(int completedFiles, int cacheHits, bool force = false)
+            {
+                if (_progress == null) return;
+                var now = _stopwatch.Elapsed;
+                if (!force && completedFiles != _totalFiles &&
+                    _lastReadingReport != TimeSpan.MinValue &&
+                    now - _lastReadingReport < MinimumReportInterval)
+                    return;
+
+                _lastReadingReport = now;
+                ReportPhase(PhotoMetadataScanPhase.Reading, completedFiles, cacheHits);
+            }
+
+            public void ReportPhase(
+                PhotoMetadataScanPhase phase,
+                int completedFiles,
+                int cacheHits)
+            {
+                _progress?.Report(new PhotoMetadataScanProgress(
+                    phase,
+                    completedFiles,
+                    _totalFiles,
+                    cacheHits));
+            }
         }
 
         private static ExifFileSnapshot TakeSnapshot(string path)

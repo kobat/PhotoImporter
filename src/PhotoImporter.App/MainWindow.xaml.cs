@@ -62,6 +62,7 @@ namespace PhotoImporter.App
         private string _presetManagerSortMode = "名前順";
         private bool _previewIsCurrent;
         private double _progressPercent;
+        private bool _isProgressIndeterminate;
         private int _exifCacheHits;
         private CancellationTokenSource _copyCancellation;
         private CopyPauseController _copyPauseController;
@@ -360,6 +361,11 @@ namespace PhotoImporter.App
         }
         public Brush MessageBrush { get => _messageBrush; private set => Set(ref _messageBrush, value); }
         public double ProgressPercent { get => _progressPercent; private set => Set(ref _progressPercent, value); }
+        public bool IsProgressIndeterminate
+        {
+            get => _isProgressIndeterminate;
+            private set => Set(ref _isProgressIndeterminate, value);
+        }
         public Visibility ProgressVisibility => _isCopying || _isScanningExif ? Visibility.Visible : Visibility.Collapsed;
         public Visibility CopyProgressDetailsVisibility => _isCopying
             ? Visibility.Visible
@@ -778,12 +784,11 @@ namespace PhotoImporter.App
                 {
                     scanCancellation = new CancellationTokenSource();
                     _scanCancellation = scanCancellation;
-                    _isScanningExif = true;
+                    SetScanningExif(true);
                     _exifCacheHits = 0;
                     ProgressPercent = 0;
-                    ProgressText = "Exifスキャン準備中...";
-                    OnPropertyChanged(nameof(ProgressVisibility));
-                    OnPropertyChanged(nameof(CanCancel));
+                    IsProgressIndeterminate = true;
+                    ProgressText = "対象ファイルを検索しています...";
                     SetMessage("Exif情報を読み取っています...", Brushes.DimGray);
                     exifProgress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 }
@@ -831,7 +836,7 @@ namespace PhotoImporter.App
             catch (Exception ex) { SetMessage(ex.Message, Brushes.Firebrick); }
             finally
             {
-                _isScanningExif = false;
+                SetScanningExif(false);
                 if (ReferenceEquals(_scanCancellation, scanCancellation)) _scanCancellation = null;
                 scanCancellation?.Dispose();
                 SetBusy(false, false);
@@ -867,6 +872,7 @@ namespace PhotoImporter.App
             _isCancellingCopy = false;
             SetBusy(true, true);
             SetMessage("コピーしています...", Brushes.DimGray);
+            IsProgressIndeterminate = false;
             ProgressPercent = 0;
             var progressStatistics = new CopyProgressStatistics();
             StartCopyProgressTracking(
@@ -1236,14 +1242,37 @@ namespace PhotoImporter.App
         private void UpdateExifScanProgress(PhotoMetadataScanProgress progress)
         {
             _exifCacheHits = progress.CacheHits;
-            ProgressPercent = progress.TotalFiles == 0
-                ? 100
-                : Math.Min(100, progress.CompletedFiles * 100.0 / progress.TotalFiles);
-            ProgressText = string.Format(
-                "Exifスキャン {0}/{1} 件（キャッシュ {2} 件）",
-                progress.CompletedFiles,
-                progress.TotalFiles,
-                progress.CacheHits);
+            switch (progress.Phase)
+            {
+                case PhotoMetadataScanPhase.Preparing:
+                    IsProgressIndeterminate = true;
+                    ProgressText = string.Format(
+                        "Exifスキャンを準備しています（解析対象 {0} 件）...",
+                        progress.TotalFiles);
+                    break;
+                case PhotoMetadataScanPhase.Reading:
+                    IsProgressIndeterminate = false;
+                    ProgressPercent = progress.TotalFiles == 0
+                        ? 100
+                        : Math.Min(100, progress.CompletedFiles * 100.0 / progress.TotalFiles);
+                    ProgressText = string.Format(
+                        "Exif {0}/{1} 件（{2:0}%、キャッシュ {3} 件）",
+                        progress.CompletedFiles,
+                        progress.TotalFiles,
+                        ProgressPercent,
+                        progress.CacheHits);
+                    break;
+                case PhotoMetadataScanPhase.SavingCache:
+                    IsProgressIndeterminate = true;
+                    ProgressText = "Exifキャッシュを保存しています...";
+                    break;
+                case PhotoMetadataScanPhase.Completed:
+                    IsProgressIndeterminate = true;
+                    ProgressText = "Exif結果を一覧へ反映しています...";
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
         }
 
         private static PreviewBuildResult BuildPreview(
@@ -1708,12 +1737,11 @@ namespace PhotoImporter.App
 
                 scanCancellation = new CancellationTokenSource();
                 _scanCancellation = scanCancellation;
-                _isScanningExif = true;
+                SetScanningExif(true);
                 _exifCacheHits = 0;
                 ProgressPercent = 0;
+                IsProgressIndeterminate = true;
                 ProgressText = "Exifスキャン準備中...";
-                OnPropertyChanged(nameof(ProgressVisibility));
-                OnPropertyChanged(nameof(CanCancel));
                 SetMessage("フィルターに必要なExif情報を読み取っています。現在の一覧は完了まで維持されます...", Brushes.DimGray);
                 var progress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 var token = scanCancellation.Token;
@@ -1756,7 +1784,7 @@ namespace PhotoImporter.App
             }
             finally
             {
-                _isScanningExif = false;
+                SetScanningExif(false);
                 if (ReferenceEquals(_scanCancellation, scanCancellation)) _scanCancellation = null;
                 scanCancellation?.Dispose();
                 SetBusy(false, false);
@@ -2755,6 +2783,15 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(CanApplyFilter));
             OnPropertyChanged(nameof(CanUndoPresetApply));
             if (!copying && !_isScanningExif) ProgressText = string.Empty;
+        }
+
+        private void SetScanningExif(bool scanning)
+        {
+            if (_isScanningExif == scanning) return;
+            _isScanningExif = scanning;
+            OnPropertyChanged(nameof(ProgressVisibility));
+            OnPropertyChanged(nameof(SimpleProgressTextVisibility));
+            OnPropertyChanged(nameof(CanCancel));
         }
 
         private static void ValidateRoots(string sourceRoot, string destinationRoot)

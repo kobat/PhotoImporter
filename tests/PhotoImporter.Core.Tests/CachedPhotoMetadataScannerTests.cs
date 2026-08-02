@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using PhotoImporter.Core.Metadata;
 using Xunit;
@@ -108,15 +109,18 @@ namespace PhotoImporter.Core.Tests
                 return PhotoMetadataReadResult.Success(CreateMetadata());
             });
             var scanner = new CachedPhotoMetadataScanner(reader);
+            var progress = new CapturingProgress<PhotoMetadataScanProgress>();
 
             Assert.Throws<OperationCanceledException>(() => scanner.Scan(
-                plan, volume, store, UtcNow(), null, cancellation.Token));
+                plan, volume, store, UtcNow(), progress, cancellation.Token));
 
             var resumed = scanner.Scan(plan, volume, store, UtcNow());
 
             Assert.Equal(3, reader.ReadCount);
             Assert.Equal(2, resumed.CacheHits);
             Assert.Equal(3, resumed.Results.Count);
+            Assert.Contains(progress.Values, item => item.Phase == PhotoMetadataScanPhase.SavingCache);
+            Assert.DoesNotContain(progress.Values, item => item.Phase == PhotoMetadataScanPhase.Completed);
         }
 
         [Fact]
@@ -136,6 +140,60 @@ namespace PhotoImporter.Core.Tests
                 cancellation.Token));
 
             Assert.Equal(0, reader.ReadCount);
+        }
+
+        [Fact]
+        public void ProgressReportsPhasesAndMonotonicReadingCounts()
+        {
+            var files = new[]
+            {
+                CreateFile("DCIM/001.jpg", "first"),
+                CreateFile("DCIM/002.jpg", "second"),
+                CreateFile("DCIM/003.jpg", "third")
+            };
+            var progress = new CapturingProgress<PhotoMetadataScanProgress>();
+            var scanner = new CachedPhotoMetadataScanner(
+                new StubReader(_ => PhotoMetadataReadResult.Success(CreateMetadata())));
+
+            scanner.Scan(
+                RawJpegAnalysisPlan.Create(files),
+                null,
+                null,
+                UtcNow(),
+                progress);
+
+            Assert.Equal(PhotoMetadataScanPhase.Preparing, progress.Values.First().Phase);
+            Assert.Equal(PhotoMetadataScanPhase.Completed, progress.Values.Last().Phase);
+            var reading = progress.Values
+                .Where(item => item.Phase == PhotoMetadataScanPhase.Reading)
+                .ToList();
+            Assert.Equal(0, reading.First().CompletedFiles);
+            Assert.Equal(files.Length, reading.Last().CompletedFiles);
+            Assert.All(reading, item => Assert.Equal(files.Length, item.TotalFiles));
+            Assert.True(reading.Zip(reading.Skip(1),
+                (first, second) => first.CompletedFiles <= second.CompletedFiles).All(value => value));
+        }
+
+        [Fact]
+        public void CachedProgressIncludesSavingPhaseAndCacheHits()
+        {
+            var photo = CreateFile("DCIM/photo.jpg", "jpeg-data");
+            var plan = RawJpegAnalysisPlan.Create(new[] { photo });
+            var volume = CreateVolume();
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var scanner = new CachedPhotoMetadataScanner(
+                new StubReader(_ => PhotoMetadataReadResult.Success(CreateMetadata())));
+            scanner.Scan(plan, volume, store, UtcNow());
+            var progress = new CapturingProgress<PhotoMetadataScanProgress>();
+
+            scanner.Scan(plan, volume, store, UtcNow().AddDays(1), progress);
+
+            Assert.Contains(progress.Values, item =>
+                item.Phase == PhotoMetadataScanPhase.Reading &&
+                item.CompletedFiles == 1 &&
+                item.CacheHits == 1);
+            Assert.Contains(progress.Values, item => item.Phase == PhotoMetadataScanPhase.SavingCache);
+            Assert.Equal(PhotoMetadataScanPhase.Completed, progress.Values.Last().Phase);
         }
 
         public void Dispose()
@@ -177,6 +235,13 @@ namespace PhotoImporter.Core.Tests
                 ReadCount++;
                 return _read(path);
             }
+        }
+
+        private sealed class CapturingProgress<T> : IProgress<T>
+        {
+            public List<T> Values { get; } = new List<T>();
+
+            public void Report(T value) => Values.Add(value);
         }
     }
 }
