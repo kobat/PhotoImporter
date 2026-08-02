@@ -869,15 +869,40 @@
                     IsEnabled="{Binding CanCancel}" Click="Cancel_Click" />
         </Grid>
 
-        <Grid Grid.Row="7" Grid.ColumnSpan="3" Margin="0,12,0,0">
+        <Grid Grid.Row="7" Grid.ColumnSpan="3" Margin="0,12,0,0"
+              Visibility="{Binding ProgressVisibility}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <ProgressBar Height="16" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}"
-                         Visibility="{Binding ProgressVisibility}" />
+                         AutomationProperties.Name="処理の進捗" />
             <TextBlock Grid.Column="1" Text="{Binding ProgressText}" Margin="12,0,0,0"
-                       VerticalAlignment="Center" />
+                       VerticalAlignment="Center"
+                       Visibility="{Binding SimpleProgressTextVisibility}" />
+            <TextBlock Grid.Column="1" Text="{Binding CopyProgressPercentText}" Margin="12,0,0,0"
+                       VerticalAlignment="Center" FontWeight="SemiBold"
+                       Visibility="{Binding CopyProgressDetailsVisibility}" />
+
+            <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0"
+                  Visibility="{Binding CopyProgressDetailsVisibility}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding CopyProgressSummaryText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" Text="{Binding CopyProgressTimeText}" Margin="24,0,0,0" />
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding CopyProgressRatesText}"
+                           Margin="0,4,0,0" Foreground="DimGray" />
+            </Grid>
         </Grid>
 
         <Grid Grid.Row="8" Grid.ColumnSpan="3" Margin="0,10,0,0">

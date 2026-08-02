@@ -73,11 +73,13 @@ namespace PhotoImporter.Core.Copying
             var results = new List<CopyItemResult>();
             var totalBytes = items.Sum(item => item.SourceSnapshot.FileSize);
             long completedBytes = 0;
+            long completedWorkBytes = 0;
+            long cumulativeTransferredBytes = 0;
             var cancelled = false;
             string batchError = null;
             var resultsBySource = new Dictionary<string, CopyItemResult>(StringComparer.OrdinalIgnoreCase);
 
-            Report(progress, 0, items.Count, 0, totalBytes, null);
+            Report(progress, 0, items.Count, 0, 0, 0, totalBytes, null);
             for (var index = 0; index < items.Count; index++)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -111,7 +113,16 @@ namespace PhotoImporter.Core.Copying
                             null);
                         results.Add(skipped);
                         resultsBySource[item.SourcePath] = skipped;
-                        Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
+                        completedWorkBytes += item.SourceSnapshot.FileSize;
+                        Report(
+                            progress,
+                            index + 1,
+                            items.Count,
+                            completedBytes,
+                            completedWorkBytes,
+                            cumulativeTransferredBytes,
+                            totalBytes,
+                            item.SourcePath);
                         continue;
                     }
                 }
@@ -123,14 +134,35 @@ namespace PhotoImporter.Core.Copying
                     ExecuteOne(item, cancellationToken, pauseController, transferred =>
                     {
                         var reported = Math.Min(item.SourceSnapshot.FileSize, Math.Max(0, transferred));
+                        cumulativeTransferredBytes += Math.Max(0, reported - currentTransferred);
                         currentTransferred = Math.Max(currentTransferred, reported);
-                        Report(progress, index, items.Count, completedBytes + currentTransferred, totalBytes, item.SourcePath);
+                        Report(
+                            progress,
+                            index,
+                            items.Count,
+                            completedBytes + currentTransferred,
+                            completedWorkBytes + currentTransferred,
+                            cumulativeTransferredBytes,
+                            totalBytes,
+                            item.SourcePath);
                     });
+                    cumulativeTransferredBytes += Math.Max(
+                        0,
+                        item.SourceSnapshot.FileSize - currentTransferred);
                     completedBytes += item.SourceSnapshot.FileSize;
+                    completedWorkBytes += item.SourceSnapshot.FileSize;
                     var copied = new CopyItemResult(item, CopyItemStatus.Copied, null, null);
                     results.Add(copied);
                     resultsBySource[item.SourcePath] = copied;
-                    Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
+                    Report(
+                        progress,
+                        index + 1,
+                        items.Count,
+                        completedBytes,
+                        completedWorkBytes,
+                        cumulativeTransferredBytes,
+                        totalBytes,
+                        item.SourcePath);
                 }
                 catch (OperationCanceledException)
                 {
@@ -148,7 +180,16 @@ namespace PhotoImporter.Core.Copying
                     var failed = new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, ex.RecoveryPath);
                     results.Add(failed);
                     resultsBySource[item.SourcePath] = failed;
-                    Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
+                    completedWorkBytes += item.SourceSnapshot.FileSize;
+                    Report(
+                        progress,
+                        index + 1,
+                        items.Count,
+                        completedBytes,
+                        completedWorkBytes,
+                        cumulativeTransferredBytes,
+                        totalBytes,
+                        item.SourcePath);
                 }
                 catch (Exception ex)
                 {
@@ -157,7 +198,16 @@ namespace PhotoImporter.Core.Copying
                     var failed = new CopyItemResult(item, CopyItemStatus.Failed, ex.Message, null);
                     results.Add(failed);
                     resultsBySource[item.SourcePath] = failed;
-                    Report(progress, index + 1, items.Count, completedBytes, totalBytes, item.SourcePath);
+                    completedWorkBytes += item.SourceSnapshot.FileSize;
+                    Report(
+                        progress,
+                        index + 1,
+                        items.Count,
+                        completedBytes,
+                        completedWorkBytes,
+                        cumulativeTransferredBytes,
+                        totalBytes,
+                        item.SourcePath);
                 }
             }
 
@@ -444,12 +494,20 @@ namespace PhotoImporter.Core.Copying
             int completedFiles,
             int totalFiles,
             long transferredBytes,
+            long completedWorkBytes,
+            long cumulativeTransferredBytes,
             long totalBytes,
             string currentSourcePath)
         {
             if (progress != null)
                 progress.Report(new CopyProgress(
-                    completedFiles, totalFiles, transferredBytes, totalBytes, currentSourcePath));
+                    completedFiles,
+                    totalFiles,
+                    transferredBytes,
+                    completedWorkBytes,
+                    cumulativeTransferredBytes,
+                    totalBytes,
+                    currentSourcePath));
         }
 
         private static bool TryMoveFile(

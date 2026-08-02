@@ -400,6 +400,41 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void WorkAndCumulativeTransferProgressRemainMonotonicAfterAFileError()
+        {
+            var first = CreateFile("first.jpg", new byte[] { 1, 2, 3, 4 });
+            var second = CreateFile("second.jpg", new byte[] { 5, 6, 7, 8 });
+            var plans = new[]
+            {
+                CreatePlan(first, Path.Combine(_root, "out", "first.jpg"), null, false),
+                CreatePlan(second, Path.Combine(_root, "out", "second.jpg"), null, false)
+            };
+            var updates = new List<CopyProgress>();
+
+            var result = new CopyEngine(new FailingFirstCopyOperation()).Execute(
+                plans,
+                new InlineProgress<CopyProgress>(updates.Add),
+                CancellationToken.None);
+
+            Assert.Equal(new[] { CopyItemStatus.Failed, CopyItemStatus.Copied },
+                result.Items.Select(item => item.Status).ToArray());
+            Assert.NotEmpty(updates);
+            for (var index = 1; index < updates.Count; index++)
+            {
+                Assert.True(
+                    updates[index].CompletedWorkBytes >= updates[index - 1].CompletedWorkBytes);
+                Assert.True(
+                    updates[index].CumulativeTransferredBytes >=
+                    updates[index - 1].CumulativeTransferredBytes);
+            }
+
+            var final = updates[updates.Count - 1];
+            Assert.Equal(8, final.CompletedWorkBytes);
+            Assert.Equal(6, final.CumulativeTransferredBytes);
+            Assert.Equal(0, final.RemainingWorkBytes);
+        }
+
+        [Fact]
         public void CopiesSidecarOnlyAfterItsImageSucceeds()
         {
             var image = CreateFile("card\\photo.jpg", new byte[] { 1, 2 });
@@ -582,6 +617,44 @@ namespace PhotoImporter.Core.Tests
                 if (progress != null) progress(source.Length);
                 if (_afterCopy != null) _afterCopy();
             }
+        }
+
+        private sealed class FailingFirstCopyOperation : ICopyFileOperation
+        {
+            private int _copyCount;
+
+            public void Copy(
+                string sourcePath,
+                string destinationPath,
+                CancellationToken cancellationToken,
+                CopyPauseController pauseController,
+                Action<long> progress)
+            {
+                var source = new FileInfo(sourcePath);
+                _copyCount++;
+                if (_copyCount == 1)
+                {
+                    if (progress != null) progress(source.Length / 2);
+                    throw new IOException("Simulated copy failure.");
+                }
+
+                var sourceAttributes = source.Attributes;
+                File.Copy(sourcePath, destinationPath, false);
+                File.SetAttributes(destinationPath, sourceAttributes & ~FileAttributes.ReadOnly);
+                File.SetLastWriteTimeUtc(destinationPath, source.LastWriteTimeUtc);
+                File.SetAttributes(destinationPath, sourceAttributes);
+                if (progress != null) progress(source.Length);
+            }
+        }
+
+        private sealed class InlineProgress<T> : IProgress<T>
+        {
+            private readonly Action<T> _report;
+
+            internal InlineProgress(Action<T> report) =>
+                _report = report ?? throw new ArgumentNullException(nameof(report));
+
+            public void Report(T value) => _report(value);
         }
 
         private sealed class FailingReadOnlyRestore : IFileAttributeOperations

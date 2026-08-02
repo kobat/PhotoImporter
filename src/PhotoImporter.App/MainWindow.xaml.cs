@@ -30,6 +30,10 @@ namespace PhotoImporter.App
         private string _message = "コピー元とコピー先を選択して、スキャンしてください。";
         private string _summary = "0 件";
         private string _progressText = string.Empty;
+        private string _copyProgressSummaryText = string.Empty;
+        private string _copyProgressRatesText = string.Empty;
+        private string _copyProgressTimeText = string.Empty;
+        private string _copyProgressPercentText = string.Empty;
         private Brush _messageBrush = Brushes.DimGray;
         private bool _isBusy;
         private bool _isCopying;
@@ -62,6 +66,8 @@ namespace PhotoImporter.App
         private CancellationTokenSource _copyCancellation;
         private CopyPauseController _copyPauseController;
         private CopyPauseState _copyPauseState = CopyPauseState.Running;
+        private CopyProgressStatistics _copyProgressStatistics;
+        private DispatcherTimer _copyProgressTimer;
         private CancellationTokenSource _scanCancellation;
         private PreviewItem _selectedPreviewItem;
         private bool _showImagePreview;
@@ -332,9 +338,35 @@ namespace PhotoImporter.App
         public string Message { get => _message; private set => Set(ref _message, value); }
         public string Summary { get => _summary; private set => Set(ref _summary, value); }
         public string ProgressText { get => _progressText; private set => Set(ref _progressText, value); }
+        public string CopyProgressSummaryText
+        {
+            get => _copyProgressSummaryText;
+            private set => Set(ref _copyProgressSummaryText, value);
+        }
+        public string CopyProgressRatesText
+        {
+            get => _copyProgressRatesText;
+            private set => Set(ref _copyProgressRatesText, value);
+        }
+        public string CopyProgressTimeText
+        {
+            get => _copyProgressTimeText;
+            private set => Set(ref _copyProgressTimeText, value);
+        }
+        public string CopyProgressPercentText
+        {
+            get => _copyProgressPercentText;
+            private set => Set(ref _copyProgressPercentText, value);
+        }
         public Brush MessageBrush { get => _messageBrush; private set => Set(ref _messageBrush, value); }
         public double ProgressPercent { get => _progressPercent; private set => Set(ref _progressPercent, value); }
         public Visibility ProgressVisibility => _isCopying || _isScanningExif ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility CopyProgressDetailsVisibility => _isCopying
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        public Visibility SimpleProgressTextVisibility => _isScanningExif
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         public bool CanEditSettings => !_isBusy;
         public bool CanSelectItems => !_isBusy;
         public bool CanSelectAll => !_isBusy && _itemCollectionState.VisibleItems.Any(item => item.CanCopy);
@@ -804,6 +836,10 @@ namespace PhotoImporter.App
             var selected = _itemCollectionState.CopyTargets.ToList();
             if (selected.Count == 0) return;
             var selectionBeforeCopy = PreviewSelectionState.Capture(Items);
+            var orderedPlan = selected
+                .OrderBy(item => item.IsAssociatedSidecar ? 1 : 0)
+                .Select(item => item.CopyPlan)
+                .ToList();
 
             var copyCancellation = new CancellationTokenSource();
             CopyPauseController pauseController = null;
@@ -817,17 +853,19 @@ namespace PhotoImporter.App
             SetBusy(true, true);
             SetMessage("コピーしています...", Brushes.DimGray);
             ProgressPercent = 0;
+            var progressStatistics = new CopyProgressStatistics();
+            StartCopyProgressTracking(
+                progressStatistics,
+                orderedPlan.Count,
+                orderedPlan.Sum(item => item.SourceSnapshot.FileSize));
 
             CopyBatchResult result = null;
             try
             {
-                var progress = new Progress<CopyProgress>(UpdateCopyProgress);
                 result = await Task.Run(() => new CopyEngine().Execute(
-                    selected
-                        .OrderBy(item => item.IsAssociatedSidecar ? 1 : 0)
-                        .Select(item => item.CopyPlan),
+                    orderedPlan,
                     Path.GetFullPath(SourceFolder),
-                    progress,
+                    progressStatistics,
                     copyCancellation.Token,
                     pauseController));
             }
@@ -843,6 +881,7 @@ namespace PhotoImporter.App
                 pauseController.Dispose();
                 _copyPauseState = CopyPauseState.Running;
                 _isCancellingCopy = false;
+                StopCopyProgressTracking(progressStatistics);
                 SetBusy(false, false);
             }
 
@@ -1026,6 +1065,10 @@ namespace PhotoImporter.App
 
             var previousState = _copyPauseState;
             _copyPauseState = controller.State;
+            _copyProgressStatistics?.SetPaused(
+                _copyPauseState == CopyPauseState.PausedBetweenFiles ||
+                _copyPauseState == CopyPauseState.PausedWithinFile);
+            RefreshCopyProgressDisplay();
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(CopyButtonText));
             if (_isCancellingCopy) return;
@@ -1066,17 +1109,113 @@ namespace PhotoImporter.App
             UpdateSummary();
         }
 
-        private void UpdateCopyProgress(CopyProgress progress)
+        private void StartCopyProgressTracking(
+            CopyProgressStatistics statistics,
+            int totalFiles,
+            long totalBytes)
         {
+            _copyProgressStatistics = statistics;
+            CopyProgressSummaryText = string.Format(
+                "処理済み 0 / {0} 件    容量 0 B / {1}",
+                totalFiles,
+                FormatBytes(totalBytes));
+            CopyProgressRatesText = "全体平均 計算中...    直近1分 計算中...";
+            CopyProgressTimeText = "経過 00:00:00    残り 計算中...";
+            CopyProgressPercentText = "0%";
+
+            var timer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            timer.Tick += CopyProgressTimer_Tick;
+            _copyProgressTimer = timer;
+            timer.Start();
+        }
+
+        private void StopCopyProgressTracking(CopyProgressStatistics statistics)
+        {
+            if (!ReferenceEquals(_copyProgressStatistics, statistics)) return;
+
+            RefreshCopyProgressDisplay();
+            var timer = _copyProgressTimer;
+            _copyProgressTimer = null;
+            _copyProgressStatistics = null;
+            if (timer == null) return;
+            timer.Stop();
+            timer.Tick -= CopyProgressTimer_Tick;
+        }
+
+        private void CopyProgressTimer_Tick(object sender, EventArgs e) =>
+            RefreshCopyProgressDisplay();
+
+        private void RefreshCopyProgressDisplay()
+        {
+            var statistics = _copyProgressStatistics;
+            if (statistics == null) return;
+
+            var snapshot = statistics.Capture();
+            var progress = snapshot.Progress;
+            if (progress == null) return;
+
             ProgressPercent = progress.TotalBytes == 0
-                ? 0
-                : Math.Min(100, progress.TransferredBytes * 100.0 / progress.TotalBytes);
-            ProgressText = string.Format(
-                "{0}/{1} 件  {2}/{3}",
+                ? 100
+                : Math.Min(100, progress.CompletedWorkBytes * 100.0 / progress.TotalBytes);
+            CopyProgressPercentText = ProgressPercent.ToString("0") + "%";
+            CopyProgressSummaryText = string.Format(
+                "処理済み {0} / {1} 件    容量 {2} / {3}",
                 progress.CompletedFiles,
                 progress.TotalFiles,
-                FormatBytes(progress.TransferredBytes),
+                FormatBytes(progress.CompletedWorkBytes),
                 FormatBytes(progress.TotalBytes));
+
+            CopyProgressRatesText = string.Format(
+                "全体平均 {0}    直近1分 {1}",
+                FormatCopyRates(
+                    snapshot.OverallFilesPerSecond,
+                    snapshot.OverallBytesPerSecond),
+                FormatCopyRates(
+                    snapshot.RecentFilesPerSecond,
+                    snapshot.RecentBytesPerSecond));
+
+            string remaining;
+            if (!snapshot.EstimatedRemaining.HasValue)
+                remaining = "計算中...";
+            else if (snapshot.EstimatedRemaining.Value == TimeSpan.Zero)
+                remaining = "00:00:00";
+            else
+                remaining = "約 " + FormatDuration(snapshot.EstimatedRemaining.Value);
+            if (snapshot.IsPaused) remaining += "（一時停止中）";
+
+            CopyProgressTimeText = string.Format(
+                "経過 {0}    残り {1}",
+                FormatDuration(snapshot.ActiveElapsed),
+                remaining);
+        }
+
+        private static string FormatCopyRates(
+            double? filesPerSecond,
+            double? bytesPerSecond)
+        {
+            if (!filesPerSecond.HasValue || !bytesPerSecond.HasValue)
+                return "計算中...";
+
+            return string.Format(
+                "{0} 件/秒・{1} MB/秒",
+                FormatRateValue(filesPerSecond.Value),
+                FormatRateValue(bytesPerSecond.Value / (1024d * 1024)));
+        }
+
+        private static string FormatRateValue(double value) =>
+            value < 1 ? value.ToString("0.00") : value.ToString("0.0");
+
+        private static string FormatDuration(TimeSpan duration)
+        {
+            var totalHours = Math.Max(0, (long)duration.TotalHours);
+            return string.Format(
+                "{0:00}:{1:00}:{2:00}",
+                totalHours,
+                duration.Minutes,
+                duration.Seconds);
         }
 
         private void UpdateExifScanProgress(PhotoMetadataScanProgress progress)
@@ -2595,6 +2734,8 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(CopyButtonText));
             OnPropertyChanged(nameof(ProgressVisibility));
+            OnPropertyChanged(nameof(CopyProgressDetailsVisibility));
+            OnPropertyChanged(nameof(SimpleProgressTextVisibility));
             OnPropertyChanged(nameof(CanEditFilters));
             OnPropertyChanged(nameof(CanApplyFilter));
             OnPropertyChanged(nameof(CanUndoPresetApply));

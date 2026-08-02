@@ -114,19 +114,27 @@ namespace PhotoImporter.Core.Copying
             int completedFiles,
             int totalFiles,
             long transferredBytes,
+            long completedWorkBytes,
+            long cumulativeTransferredBytes,
             long totalBytes,
             string currentSourcePath)
         {
             CompletedFiles = completedFiles;
             TotalFiles = totalFiles;
             TransferredBytes = transferredBytes;
+            CompletedWorkBytes = completedWorkBytes;
+            CumulativeTransferredBytes = cumulativeTransferredBytes;
             TotalBytes = totalBytes;
+            RemainingWorkBytes = Math.Max(0, totalBytes - completedWorkBytes);
             CurrentSourcePath = currentSourcePath;
         }
 
         public int CompletedFiles { get; }
         public int TotalFiles { get; }
         public long TransferredBytes { get; }
+        public long CompletedWorkBytes { get; }
+        public long CumulativeTransferredBytes { get; }
+        public long RemainingWorkBytes { get; }
         public long TotalBytes { get; }
         public string CurrentSourcePath { get; }
     }
