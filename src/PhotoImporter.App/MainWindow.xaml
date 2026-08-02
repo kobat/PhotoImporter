@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Photo Importer" Height="820" Width="1480"
         MinHeight="680" MinWidth="1180"
+        Icon="Assets/PhotoImporter.ico"
         WindowStartupLocation="CenterScreen"
         KeyDown="MainWindow_KeyDown">
     <Window.Resources>

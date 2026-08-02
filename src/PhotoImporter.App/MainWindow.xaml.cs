@@ -85,6 +85,7 @@ namespace PhotoImporter.App
         private readonly List<string> _appliedFilterConditionSummaries = new List<string>();
         private string _appliedFilterStateKey = string.Empty;
         private OverlayPanel _activeOverlay;
+        private SystemMenuAboutCommand _systemMenuAboutCommand;
 
         private enum OverlayPanel
         {
@@ -121,6 +122,10 @@ namespace PhotoImporter.App
             }
 
             InitializeComponent();
+            _systemMenuAboutCommand = new SystemMenuAboutCommand(
+                this,
+                "バージョン情報(&A)...",
+                ShowAboutWindow);
             _itemCollectionState = new PreviewItemCollectionState(Items);
             FilterFieldOptions = FilterFieldOption.CreateAll();
             DataContext = this;
@@ -144,6 +149,11 @@ namespace PhotoImporter.App
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
+
+        private void ShowAboutWindow()
+        {
+            new AboutWindow { Owner = this }.ShowDialog();
+        }
 
         public ObservableCollection<PreviewItem> Items { get; } = new ObservableCollection<PreviewItem>();
         public ObservableCollection<FilterConditionEditor> FilterConditions { get; } = new ObservableCollection<FilterConditionEditor>();

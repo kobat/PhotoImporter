@@ -1,0 +1,22 @@
+{
+  "product": "Photo Importer",
+  "selectedVariant": "A",
+  "generatedDate": "2026-08-02",
+  "generator": "OpenAI ImageGen built-in tool",
+  "assetType": "raster application icon",
+  "palette": {
+    "gradientStart": "#075FD8",
+    "gradientEnd": "#2494F2",
+    "glyph": "#FFFFFF",
+    "background": "transparent",
+    "chromaKey": "#FF00FF"
+  },
+  "icoSizes": [16, 20, 24, 32, 40, 48, 64, 128, 256],
+  "invariants": [
+    "Preserve the photo-frame, mountain, sun, and downward-arrow geometry",
+    "Preserve the white glyphs",
+    "Do not add text, watermark, texture, or shadow",
+    "Keep the outer background transparent",
+    "Verify readability at 16 px"
+  ]
+}
