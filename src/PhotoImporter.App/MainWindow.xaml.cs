@@ -1687,7 +1687,7 @@ namespace PhotoImporter.App
             {
                 if (closing == OverlayPanel.ExifSettings) ExifSettingsButton.Focus();
                 else if (closing == OverlayPanel.Filter) FilterSettingsButton.Focus();
-                else OpenPresetManagerButton.Focus();
+                else PresetActionsButton.Focus();
             }), DispatcherPriority.Input);
         }
 
@@ -1740,6 +1740,15 @@ namespace PhotoImporter.App
         private void SavePreset_Click(object sender, RoutedEventArgs e) => SaveCurrentPreset();
 
         private void SavePresetAs_Click(object sender, RoutedEventArgs e) => SaveCurrentPresetAs();
+
+        private void PresetActions_Click(object sender, RoutedEventArgs e)
+        {
+            var menu = PresetActionsButton.ContextMenu;
+            if (menu == null) return;
+            menu.PlacementTarget = PresetActionsButton;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.IsOpen = true;
+        }
 
         private void UndoPresetApply_Click(object sender, RoutedEventArgs e)
         {

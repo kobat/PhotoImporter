@@ -116,59 +116,13 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Grid.ColumnSpan="3" Margin="0,0,0,10"
-              IsEnabled="{Binding CanEditSettings}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="112" />
-                <ColumnDefinition Width="300" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="プリセット" VerticalAlignment="Center" />
-            <ComboBox x:Name="PresetSelector" Grid.Column="1"
-                      ItemsSource="{Binding Presets}"
-                      DisplayMemberPath="Name"
-                      SelectedItem="{Binding SelectedPreset, Mode=OneWay}"
-                      DropDownOpened="PresetSelector_DropDownOpened"
-                      SelectionChanged="PresetSelector_SelectionChanged"
-                      PreviewMouseWheel="PresetSelector_PreviewMouseWheel"
-                      AutomationProperties.AutomationId="PresetSelector"
-                      AutomationProperties.Name="設定プリセット" />
-            <Button Grid.Column="2" Content="保存" Margin="8,0,0,0" Padding="12,3"
-                    Click="SavePreset_Click"
-                    AutomationProperties.AutomationId="SavePreset" />
-            <Button Grid.Column="3" Content="名前を付けて保存..." Margin="8,0,0,0" Padding="12,3"
-                    Click="SavePresetAs_Click"
-                    AutomationProperties.AutomationId="SavePresetAs" />
-            <Button x:Name="OpenPresetManagerButton" Grid.Column="4" Content="管理..." Margin="8,0,0,0" Padding="12,3"
-                    Click="ShowPresetManager_Click"
-                    AutomationProperties.AutomationId="OpenPresetManager" />
-            <TextBlock Grid.Column="5" Text="{Binding PresetStatusText}"
-                       Visibility="{Binding PresetStatusVisibility}"
-                       Margin="12,0,0,0" VerticalAlignment="Center"
-                       Foreground="DarkGoldenrod"
-                       AutomationProperties.AutomationId="PresetDirtyIndicator" />
-            <StackPanel Grid.Column="6" Orientation="Horizontal"
-                        Visibility="{Binding PresetUndoVisibility}">
-                <TextBlock Text="プリセットを適用しました" VerticalAlignment="Center" />
-                <Button Content="元に戻す" Margin="8,0,0,0" Padding="10,3"
-                        IsEnabled="{Binding CanUndoPresetApply}"
-                        Click="UndoPresetApply_Click"
-                        AutomationProperties.AutomationId="UndoPresetApply" />
-            </StackPanel>
-        </Grid>
-
-        <Grid Grid.Row="1" Margin="0,0,0,10" IsEnabled="{Binding CanEditSettings}">
+        <Grid Grid.Row="0" Margin="0,0,0,10" IsEnabled="{Binding CanEditSettings}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="112" />
                 <ColumnDefinition Width="*" />
@@ -194,7 +148,7 @@
             <Button Grid.Column="2" Content="選択..." Click="SelectSource_Click" />
         </Grid>
 
-        <Grid Grid.Row="2" Margin="0,0,0,10" IsEnabled="{Binding CanEditSettings}">
+        <Grid Grid.Row="1" Margin="0,0,0,10" IsEnabled="{Binding CanEditSettings}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="112" />
                 <ColumnDefinition Width="*" />
@@ -220,7 +174,7 @@
             <Button Grid.Column="2" Content="選択..." Click="SelectDestination_Click" />
         </Grid>
 
-        <Grid Grid.Row="3" Margin="0,0,0,10">
+        <Grid Grid.Row="2" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="112" />
                 <ColumnDefinition Width="*" />
@@ -248,7 +202,7 @@
                     IsDefault="True" IsEnabled="{Binding CanScan}" Click="Scan_Click" />
         </Grid>
 
-        <Grid Grid.Row="4" Margin="112,0,0,10" IsEnabled="{Binding CanEditSettings}">
+        <Grid Grid.Row="3" Margin="112,0,0,10" IsEnabled="{Binding CanEditSettings}">
             <StackPanel>
                 <CheckBox Content="画像・動画以外のファイルも含める"
                           IsChecked="{Binding IncludeOtherFiles}"
@@ -282,7 +236,7 @@
             </StackPanel>
         </Grid>
 
-        <Border Grid.Row="5" Margin="0,0,0,10" Padding="8,5"
+        <Border Grid.Row="4" Margin="0,0,0,10" Padding="8,5"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1" CornerRadius="3">
             <Grid>
@@ -305,7 +259,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="5" Grid.RowSpan="3" Grid.Column="0" Panel.ZIndex="20"
+        <Grid Grid.Row="4" Grid.RowSpan="2" Grid.Column="0" Panel.ZIndex="20"
               Visibility="{Binding ExifSettingsOverlayVisibility}"
               Background="Transparent">
             <Border VerticalAlignment="Top" Padding="14"
@@ -360,23 +314,7 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="6" Margin="0,0,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="112" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="コピー設定" VerticalAlignment="Center" />
-            <CheckBox Grid.Column="1" Content="既存ファイルを上書きする"
-                      IsEnabled="{Binding CanEditSettings}" IsChecked="{Binding OverwriteExisting}" />
-            <Button Grid.Column="2" Content="{Binding CopyButtonText}" MinWidth="100" Margin="8,0,0,0"
-                    IsEnabled="{Binding CanCopy}" Click="Copy_Click" />
-            <Button Grid.Column="3" Content="キャンセル" MinWidth="100" Margin="8,0,0,0"
-                    IsEnabled="{Binding CanCancel}" Click="Cancel_Click" />
-        </Grid>
-
-        <Grid Grid.Row="7">
+        <Grid Grid.Row="5">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -697,11 +635,11 @@
             </Grid>
         </Grid>
 
-        <GridSplitter Grid.Row="1" Grid.RowSpan="7" Grid.Column="1"
+        <GridSplitter Grid.Row="0" Grid.RowSpan="6" Grid.Column="1"
                       Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                       Background="Transparent" ResizeDirection="Columns" />
 
-        <Border Grid.Row="1" Grid.RowSpan="7" Grid.Column="2" Margin="14,0,0,0"
+        <Border Grid.Row="0" Grid.RowSpan="6" Grid.Column="2" Margin="14,0,0,0"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1" CornerRadius="4" Padding="12">
             <DockPanel>
@@ -760,7 +698,7 @@
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="0" Grid.RowSpan="10" Grid.ColumnSpan="3" Panel.ZIndex="60"
+        <Grid Grid.Row="0" Grid.RowSpan="9" Grid.ColumnSpan="3" Panel.ZIndex="60"
               Visibility="{Binding PresetManagerOverlayVisibility}"
               Background="#66000000">
             <Border Margin="44" Padding="18"
@@ -859,7 +797,79 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="8" Grid.ColumnSpan="3" Margin="0,12,0,0">
+        <Grid Grid.Row="6" Grid.ColumnSpan="3" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="プリセット" Margin="0,0,8,0"
+                       VerticalAlignment="Center" />
+            <ComboBox x:Name="PresetSelector" Grid.Column="1"
+                      ItemsSource="{Binding Presets}"
+                      DisplayMemberPath="Name"
+                      SelectedItem="{Binding SelectedPreset, Mode=OneWay}"
+                      IsEnabled="{Binding CanEditSettings}"
+                      DropDownOpened="PresetSelector_DropDownOpened"
+                      SelectionChanged="PresetSelector_SelectionChanged"
+                      PreviewMouseWheel="PresetSelector_PreviewMouseWheel"
+                      ToolTip="設定プリセット"
+                      AutomationProperties.AutomationId="PresetSelector"
+                      AutomationProperties.Name="設定プリセット" />
+            <Button x:Name="PresetActionsButton" Grid.Column="2"
+                    Content="⋯" MinWidth="34" Margin="8,0,0,0" Padding="8,3"
+                    IsEnabled="{Binding CanEditSettings}"
+                    Click="PresetActions_Click"
+                    ToolTip="プリセット操作"
+                    AutomationProperties.AutomationId="PresetActions"
+                    AutomationProperties.Name="プリセット操作">
+                <Button.ContextMenu>
+                    <ContextMenu Placement="Bottom">
+                        <MenuItem Header="保存"
+                                  Click="SavePreset_Click"
+                                  AutomationProperties.AutomationId="SavePreset" />
+                        <MenuItem Header="名前を付けて保存..."
+                                  Click="SavePresetAs_Click"
+                                  AutomationProperties.AutomationId="SavePresetAs" />
+                        <Separator />
+                        <MenuItem Header="管理..."
+                                  Click="ShowPresetManager_Click"
+                                  AutomationProperties.AutomationId="OpenPresetManager" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
+            <TextBlock Grid.Column="3" Text="{Binding PresetStatusText}"
+                       Visibility="{Binding PresetStatusVisibility}"
+                       Margin="12,0,0,0" VerticalAlignment="Center"
+                       Foreground="DarkGoldenrod"
+                       AutomationProperties.AutomationId="PresetDirtyIndicator" />
+            <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0"
+                        Visibility="{Binding PresetUndoVisibility}">
+                <TextBlock Text="プリセットを適用しました" VerticalAlignment="Center" />
+                <Button Content="元に戻す" Margin="8,0,0,0" Padding="10,3"
+                        IsEnabled="{Binding CanUndoPresetApply}"
+                        Click="UndoPresetApply_Click"
+                        AutomationProperties.AutomationId="UndoPresetApply" />
+            </StackPanel>
+            <CheckBox Grid.Column="6" Content="既存ファイルを上書きする"
+                      VerticalAlignment="Center"
+                      IsEnabled="{Binding CanEditSettings}"
+                      IsChecked="{Binding OverwriteExisting}" />
+            <Button Grid.Column="7" Content="{Binding CopyButtonText}"
+                    MinWidth="100" Margin="8,0,0,0"
+                    IsEnabled="{Binding CanCopy}" Click="Copy_Click" />
+            <Button Grid.Column="8" Content="キャンセル"
+                    MinWidth="100" Margin="8,0,0,0"
+                    IsEnabled="{Binding CanCancel}" Click="Cancel_Click" />
+        </Grid>
+
+        <Grid Grid.Row="7" Grid.ColumnSpan="3" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -870,7 +880,7 @@
                        VerticalAlignment="Center" />
         </Grid>
 
-        <Grid Grid.Row="9" Grid.ColumnSpan="3" Margin="0,10,0,0">
+        <Grid Grid.Row="8" Grid.ColumnSpan="3" Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
