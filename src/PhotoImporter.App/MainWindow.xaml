@@ -309,6 +309,11 @@
                         </Grid>
                         <TextBlock Text="保存先を変えても、以前の保存先にあるキャッシュは移動・削除されません。"
                                    Margin="20,4,0,0" Foreground="DimGray" TextWrapping="Wrap" />
+                        <Button Content="Exif キャッシュを管理..."
+                                Margin="20,12,0,0" Padding="12,4"
+                                HorizontalAlignment="Left"
+                                Click="ManageExifCache_Click"
+                                AutomationProperties.AutomationId="ManageExifCache" />
                     </StackPanel>
                 </Grid>
             </Border>

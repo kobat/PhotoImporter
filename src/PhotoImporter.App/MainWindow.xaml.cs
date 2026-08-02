@@ -562,6 +562,21 @@ namespace PhotoImporter.App
         private void ResetExifCacheRoot_Click(object sender, RoutedEventArgs e) =>
             ChangeExifCacheRoot(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "ExifCache")), true);
 
+        private void ManageExifCache_Click(object sender, RoutedEventArgs e)
+        {
+            var manager = new ExifCacheManagerWindow(
+                this,
+                ExifCacheRoot,
+                _previousExifCacheRoots,
+                SourceFolder);
+            manager.ShowDialog();
+
+            var remaining = manager.RemainingPreviousRoots;
+            if (_previousExifCacheRoots.SequenceEqual(remaining, StringComparer.OrdinalIgnoreCase)) return;
+            _previousExifCacheRoots.Clear();
+            _previousExifCacheRoots.AddRange(remaining);
+        }
+
         private void ShowExifSettingsOverlay_Click(object sender, RoutedEventArgs e) =>
             SetActiveOverlay(OverlayPanel.ExifSettings);
 

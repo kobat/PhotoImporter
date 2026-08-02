@@ -18,6 +18,7 @@ namespace PhotoImporter.Core.Metadata
         internal const int LegacyEntriesSchemaVersion = 1;
         internal const string EntriesFileName = "entries.tsv";
         internal const string LegacyEntriesFileName = "entries.json";
+        internal const string MetadataFileName = "meta.json";
         private readonly string _cacheRoot;
         private readonly TimeSpan _lockTimeout;
 
@@ -42,6 +43,24 @@ namespace PhotoImporter.Core.Metadata
             CancellationToken cancellationToken = default(CancellationToken))
         {
             if (volume == null) throw new ArgumentNullException(nameof(volume));
+            return TryOpenCore(volume.SerialNumber, volume, true, out session, out warning, cancellationToken);
+        }
+
+        internal bool TryOpenExisting(
+            uint volumeSerialNumber,
+            out ExifCacheSession session,
+            out string warning,
+            CancellationToken cancellationToken = default(CancellationToken)) =>
+            TryOpenCore(volumeSerialNumber, null, false, out session, out warning, cancellationToken);
+
+        private bool TryOpenCore(
+            uint volumeSerialNumber,
+            VolumeInfo volume,
+            bool createIfMissing,
+            out ExifCacheSession session,
+            out string warning,
+            CancellationToken cancellationToken)
+        {
             cancellationToken.ThrowIfCancellationRequested();
             session = null;
             warning = null;
@@ -50,7 +69,7 @@ namespace PhotoImporter.Core.Metadata
             var ownsMutex = false;
             try
             {
-                mutex = new Mutex(false, CreateMutexName(_cacheRoot, volume.SerialNumber));
+                mutex = new Mutex(false, CreateMutexName(_cacheRoot, volumeSerialNumber));
                 try
                 {
                     if (cancellationToken.CanBeCanceled)
@@ -79,10 +98,18 @@ namespace PhotoImporter.Core.Metadata
 
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var volumeFolder = Path.Combine(_cacheRoot, volume.SerialNumberHex);
-                Directory.CreateDirectory(volumeFolder);
+                var volumeFolder = Path.Combine(
+                    _cacheRoot,
+                    volumeSerialNumber.ToString("X8", CultureInfo.InvariantCulture));
+                if (createIfMissing)
+                    Directory.CreateDirectory(volumeFolder);
+                else if (!Directory.Exists(volumeFolder))
+                {
+                    warning = "指定された Exif キャッシュは見つかりません。";
+                    return false;
+                }
                 CleanupPartialFiles(volumeFolder);
-                session = ExifCacheSession.Load(volumeFolder, mutex);
+                session = ExifCacheSession.Load(volumeFolder, mutex, volume);
                 mutex = null;
                 ownsMutex = false;
                 return true;
@@ -121,7 +148,7 @@ namespace PhotoImporter.Core.Metadata
 
         private static void CleanupPartialFiles(string volumeFolder)
         {
-            foreach (var pattern in new[] { "entries.tsv.*.partial", "entries.json.*.partial" })
+            foreach (var pattern in new[] { "entries.tsv.*.partial", "entries.json.*.partial", "meta.json.*.partial" })
             {
                 foreach (var path in Directory.EnumerateFiles(volumeFolder, pattern))
                 {
@@ -141,24 +168,33 @@ namespace PhotoImporter.Core.Metadata
     {
         private readonly string _entriesPath;
         private readonly string _legacyEntriesPath;
+        private readonly string _volumeFolder;
         private readonly Mutex _mutex;
         private readonly Dictionary<CacheIdentity, CacheEntryData> _entries;
+        private readonly ExifCacheMetadataData _metadata;
         private bool _dirty;
+        private bool _metadataDirty;
+        private bool _skipSave;
         private bool _disposed;
 
         private ExifCacheSession(
             string volumeFolder,
             Mutex mutex,
             Dictionary<CacheIdentity, CacheEntryData> entries,
+            ExifCacheMetadataData metadata,
             bool recoveredFromInvalidFile,
-            bool needsSave)
+            bool needsSave,
+            bool metadataNeedsSave)
         {
+            _volumeFolder = volumeFolder;
             _entriesPath = Path.Combine(volumeFolder, ExifCacheStore.EntriesFileName);
             _legacyEntriesPath = Path.Combine(volumeFolder, ExifCacheStore.LegacyEntriesFileName);
             _mutex = mutex;
             _entries = entries;
+            _metadata = metadata;
             RecoveredFromInvalidFile = recoveredFromInvalidFile;
             _dirty = needsSave;
+            _metadataDirty = metadataNeedsSave;
         }
 
         public bool RecoveredFromInvalidFile { get; }
@@ -183,6 +219,7 @@ namespace PhotoImporter.Core.Metadata
                 entry.LastUsedUtcDateTicks = todayTicks;
                 _dirty = true;
             }
+            TouchMetadata(todayTicks);
             result = entry.ToResult();
             return true;
         }
@@ -197,20 +234,85 @@ namespace PhotoImporter.Core.Metadata
 
             _entries[CacheIdentity.From(key)] = CacheEntryData.From(key, result, utcNow.Date.Ticks);
             _dirty = true;
+            TouchMetadata(utcNow.Date.Ticks);
+        }
+
+        internal int RemoveEntriesLastUsedBefore(DateTime cutoffUtcDate)
+        {
+            EnsureUsable();
+            ValidateUtc(cutoffUtcDate, nameof(cutoffUtcDate));
+            var cutoffTicks = cutoffUtcDate.Date.Ticks;
+            var keys = _entries.Where(pair => pair.Value.LastUsedUtcDateTicks < cutoffTicks)
+                .Select(pair => pair.Key)
+                .ToList();
+            foreach (var key in keys) _entries.Remove(key);
+            if (keys.Count != 0)
+            {
+                _dirty = true;
+                _metadataDirty = true;
+            }
+            return keys.Count;
+        }
+
+        internal void SetDisplayName(string displayName)
+        {
+            EnsureUsable();
+            var normalized = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+            if (string.Equals(_metadata.DisplayName, normalized, StringComparison.Ordinal)) return;
+            _metadata.DisplayName = normalized;
+            _metadataDirty = true;
+        }
+
+        internal ExifCacheMetadataSnapshot GetMetadataSnapshot()
+        {
+            EnsureUsable();
+            UpdateDerivedMetadata();
+            return _metadata.ToSnapshot();
+        }
+
+        internal void DeleteVolumeFolder()
+        {
+            EnsureUsable();
+            _skipSave = true;
+            DeleteDirectoryTree(_volumeFolder);
+        }
+
+        private static void DeleteDirectoryTree(string path)
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                Directory.Delete(path, false);
+                return;
+            }
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly))
+                File.Delete(file);
+            foreach (var directory in Directory.EnumerateDirectories(path, "*", SearchOption.TopDirectoryOnly))
+                DeleteDirectoryTree(directory);
+            Directory.Delete(path, false);
         }
 
         public void Save()
         {
             EnsureUsable();
-            if (!_dirty) return;
+            if (_dirty)
+            {
+                var entries = _entries.Values.OrderBy(entry => entry.ComparisonPath, StringComparer.Ordinal)
+                    .ThenBy(entry => entry.FileSize)
+                    .ThenBy(entry => entry.LastWriteTimeUtcTicks)
+                    .ToList();
+                WriteAtomically(_entriesPath, entries);
+                if (File.Exists(_legacyEntriesPath)) File.Delete(_legacyEntriesPath);
+                _dirty = false;
+            }
 
-            var entries = _entries.Values.OrderBy(entry => entry.ComparisonPath, StringComparer.Ordinal)
-                .ThenBy(entry => entry.FileSize)
-                .ThenBy(entry => entry.LastWriteTimeUtcTicks)
-                .ToList();
-            WriteAtomically(_entriesPath, entries);
-            if (File.Exists(_legacyEntriesPath)) File.Delete(_legacyEntriesPath);
-            _dirty = false;
+            UpdateDerivedMetadata();
+            if (_metadataDirty)
+            {
+                ExifCacheMetadataFile.WriteAtomically(
+                    Path.Combine(_volumeFolder, ExifCacheStore.MetadataFileName),
+                    _metadata);
+                _metadataDirty = false;
+            }
         }
 
         public void Dispose()
@@ -218,7 +320,7 @@ namespace PhotoImporter.Core.Metadata
             if (_disposed) return;
             try
             {
-                Save();
+                if (!_skipSave) Save();
             }
             finally
             {
@@ -228,7 +330,7 @@ namespace PhotoImporter.Core.Metadata
             }
         }
 
-        internal static ExifCacheSession Load(string volumeFolder, Mutex mutex)
+        internal static ExifCacheSession Load(string volumeFolder, Mutex mutex, VolumeInfo volume)
         {
             var entriesPath = Path.Combine(volumeFolder, ExifCacheStore.EntriesFileName);
             var legacyEntriesPath = Path.Combine(volumeFolder, ExifCacheStore.LegacyEntriesFileName);
@@ -268,7 +370,45 @@ namespace PhotoImporter.Core.Metadata
             }
 
             if (File.Exists(entriesPath) && File.Exists(legacyEntriesPath)) needsSave = true;
-            return new ExifCacheSession(volumeFolder, mutex, entries, recovered, needsSave);
+
+            bool metadataNeedsSave;
+            var metadata = ExifCacheMetadataFile.Load(
+                Path.Combine(volumeFolder, ExifCacheStore.MetadataFileName),
+                out metadataNeedsSave);
+            var session = new ExifCacheSession(
+                volumeFolder,
+                mutex,
+                entries,
+                metadata,
+                recovered,
+                needsSave,
+                metadataNeedsSave);
+            if (volume != null) session.UpdateVolumeInfo(volume);
+            return session;
+        }
+
+        private void UpdateVolumeInfo(VolumeInfo volume)
+        {
+            if (_metadata.UpdateVolumeInfo(volume)) _metadataDirty = true;
+        }
+
+        private void TouchMetadata(long utcDateTicks)
+        {
+            if (_metadata.Touch(utcDateTicks)) _metadataDirty = true;
+        }
+
+        private void UpdateDerivedMetadata()
+        {
+            long? earliest = null;
+            long? latest = null;
+            foreach (var entry in _entries.Values)
+            {
+                if (!earliest.HasValue || entry.LastUsedUtcDateTicks < earliest.Value)
+                    earliest = entry.LastUsedUtcDateTicks;
+                if (!latest.HasValue || entry.LastUsedUtcDateTicks > latest.Value)
+                    latest = entry.LastUsedUtcDateTicks;
+            }
+            if (_metadata.UpdateDerived(_entries.Count, earliest, latest)) _metadataDirty = true;
         }
 
         private static readonly string[] ColumnNames =
