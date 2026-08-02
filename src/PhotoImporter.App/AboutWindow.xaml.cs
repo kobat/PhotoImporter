@@ -36,6 +36,11 @@ namespace PhotoImporter.App
         private void OpenReleases_Click(object sender, RoutedEventArgs e) => OpenUrl(ReleasesUrl);
         private void OpenIssues_Click(object sender, RoutedEventArgs e) => OpenUrl(IssuesUrl);
 
+        private void OpenLicenseInformation_Click(object sender, RoutedEventArgs e)
+        {
+            new LicenseInformationWindow { Owner = this }.ShowDialog();
+        }
+
         private void OpenUrl(string url)
         {
             try

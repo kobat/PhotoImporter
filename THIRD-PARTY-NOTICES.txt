@@ -1,0 +1,43 @@
+Photo Importer Third-Party Notices
+==================================
+
+Photo Importer includes the following third-party software in its binary
+distribution. The complete license and notice texts are included in the
+Licenses directory of the distribution and can also be viewed from
+"バージョン情報" > "ライセンス情報..." in the application.
+
+MetadataExtractor 2.9.3
+-----------------------
+Copyright Drew Noakes 2002-2026
+Copyright 2014 Imazen LLC (initial conversion from Java to C#)
+License: Apache License 2.0
+Source: https://github.com/drewnoakes/metadata-extractor-dotnet
+License file: Licenses/MetadataExtractorApache2.txt
+
+XmpCore 6.1.10.1
+-----------------
+Derived from the Adobe XMP SDK.
+Copyright 2015-2021 XmpCore contributors
+Copyright (c) 1999-2016 Adobe Systems Incorporated
+License: BSD 3-Clause License
+Source: https://github.com/drewnoakes/xmp-core-dotnet
+License file: Licenses/XmpCoreBSD.txt
+
+Microsoft .NET support libraries
+--------------------------------
+The distribution includes these NuGet packages:
+
+- System.Buffers 4.6.1
+- System.Memory 4.6.3
+- System.Numerics.Vectors 4.6.1
+- System.Runtime.CompilerServices.Unsafe 6.1.2
+- System.Text.Encoding.CodePages 10.0.5
+
+Copyright (c) .NET Foundation and Contributors
+License: MIT License
+Source: https://github.com/dotnet/runtime
+License file: Licenses/MicrosoftMIT.txt
+Additional notices: Licenses/MicrosoftThirdPartyNotices.txt
+
+The notices above are provided for attribution and informational purposes.
+They do not alter the license terms of Photo Importer itself.
