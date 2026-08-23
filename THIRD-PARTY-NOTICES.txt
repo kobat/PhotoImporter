@@ -23,6 +23,15 @@ License: BSD 3-Clause License
 Source: https://github.com/drewnoakes/xmp-core-dotnet
 License file: Licenses/XmpCoreBSD.txt
 
+Costura.Fody 6.2.0
+------------------
+Copyright (c) 2012 Simon Cropp and contributors
+License: MIT License
+Source: https://github.com/Fody/Costura
+License file: Licenses/CosturaMIT.txt
+
+Costura embeds the managed runtime dependencies into PhotoImporter.exe.
+
 Microsoft .NET support libraries
 --------------------------------
 The distribution includes these NuGet packages:

@@ -2,5 +2,8 @@
 **/obj/
 .vs/
 TestResults/
+artifacts/
+.claude/
+FodyWeavers.xsd
 *.user
 *.suo

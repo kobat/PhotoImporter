@@ -9,7 +9,7 @@ namespace PhotoImporter.Core.Tests
         [Fact]
         public void EveryCatalogEntryHasEmbeddedLicenseText()
         {
-            Assert.Equal(5, LicenseInformationCatalog.Items.Count);
+            Assert.Equal(6, LicenseInformationCatalog.Items.Count);
             Assert.All(LicenseInformationCatalog.Items, item =>
             {
                 Assert.False(string.IsNullOrWhiteSpace(item.Category));
@@ -27,7 +27,7 @@ namespace PhotoImporter.Core.Tests
                 .ToDictionary(group => group.Key, group => group.Count());
 
             Assert.Equal(1, categories["このアプリのライセンス"]);
-            Assert.Equal(4, categories["第三者ライブラリのライセンス"]);
+            Assert.Equal(5, categories["第三者ライブラリのライセンス"]);
         }
 
         [Fact]
@@ -38,6 +38,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Contains(names, name => name.StartsWith("Photo Importer"));
             Assert.Contains(names, name => name.StartsWith("MetadataExtractor"));
             Assert.Contains(names, name => name.StartsWith("XmpCore"));
+            Assert.Contains(names, name => name.StartsWith("Costura.Fody"));
             Assert.Contains(names, name => name.Contains("Microsoft .NET"));
             Assert.Contains(names, name => name.Contains("Microsoft 第三者ライブラリ"));
         }

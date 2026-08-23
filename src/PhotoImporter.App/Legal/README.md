@@ -17,6 +17,10 @@ Sources for the current v0.1.0 dependency set:
   <https://github.com/dotnet/runtime/blob/main/LICENSE.TXT>.
 - `MicrosoftThirdPartyNotices.txt`: copied verbatim from the
   System.Text.Encoding.CodePages 10.0.5 NuGet package.
+- `CosturaMIT.txt`: the MIT license from
+  <https://github.com/Fody/Costura>. Costura.Fody 6.2.0 embeds managed runtime
+  dependencies into the release executable. Fody itself is used only while
+  building and is not part of the distributed application.
 - Photo Importer's own license is embedded directly from the repository-root
   `LICENSE` file, so there is only one source of truth.
 

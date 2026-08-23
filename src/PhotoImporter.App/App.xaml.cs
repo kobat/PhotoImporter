@@ -8,6 +8,12 @@ namespace PhotoImporter.App
 {
     public partial class App : Application
     {
+        static App()
+        {
+            AppContext.SetSwitch("Switch.System.IO.UseLegacyPathHandling", false);
+            AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
+        }
+
         private readonly string _errorLogPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "PhotoImporter",

@@ -30,7 +30,7 @@ namespace PhotoImporter.App
             {
                 new LicenseInformationItem(
                     AppLocalization.Text("このアプリのライセンス", "Application license"),
-                    "Photo Importer 0.1.0",
+                    "Photo Importer " + GetProductVersion(),
                     "Copyright © 2026 KOBAT — MIT License",
                     "PhotoImporterMIT.txt"),
                 new LicenseInformationItem(
@@ -47,6 +47,11 @@ namespace PhotoImporter.App
                     "XmpCoreBSD.txt"),
                 new LicenseInformationItem(
                     AppLocalization.Text("第三者ライブラリのライセンス", "Third-party library licenses"),
+                    "Costura.Fody 6.2.0",
+                    "Copyright © 2012 Simon Cropp and contributors — MIT License",
+                    "CosturaMIT.txt"),
+                new LicenseInformationItem(
+                    AppLocalization.Text("第三者ライブラリのライセンス", "Third-party library licenses"),
                     AppLocalization.Text("Microsoft .NET 補助ライブラリ", "Microsoft .NET support libraries"),
                     "System.Buffers 4.6.1 / System.Memory 4.6.3 / System.Numerics.Vectors 4.6.1 / " +
                     "System.Runtime.CompilerServices.Unsafe 6.1.2 / System.Text.Encoding.CodePages 10.0.5 — MIT License",
@@ -59,6 +64,17 @@ namespace PhotoImporter.App
                         "Third-party license notices included with System.Text.Encoding.CodePages 10.0.5"),
                     "MicrosoftThirdPartyNotices.txt")
             });
+
+        private static string GetProductVersion()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var attribute = (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(
+                assembly,
+                typeof(AssemblyInformationalVersionAttribute));
+            return string.IsNullOrWhiteSpace(attribute?.InformationalVersion)
+                ? assembly.GetName().Version.ToString(3)
+                : attribute.InformationalVersion;
+        }
 
         internal static string LoadResourceText(string resourceFileName)
         {
