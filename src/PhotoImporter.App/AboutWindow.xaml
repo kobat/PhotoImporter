@@ -11,6 +11,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid>
@@ -29,7 +30,19 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1" Margin="0,22,0,0">
+        <Grid Grid.Row="1" Margin="96,18,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="表示言語" Margin="0,0,12,0" VerticalAlignment="Center" />
+            <ComboBox x:Name="LanguageSelector" Grid.Column="1" MinWidth="190"
+                      DisplayMemberPath="DisplayName"
+                      SelectionChanged="LanguageSelector_SelectionChanged"
+                      AutomationProperties.Name="表示言語" />
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,22,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />

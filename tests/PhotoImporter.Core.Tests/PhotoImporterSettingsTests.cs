@@ -28,6 +28,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(PhotoImporterSettings.DefaultInputHistoryLimit, settings.InputHistoryLimit);
             Assert.Null(settings.CustomExifCacheRoot);
             Assert.Null(settings.LastAppliedPresetId);
+            Assert.Equal("auto", settings.UiLanguage);
             Assert.Empty(settings.PreviousExifCacheRoots);
         }
 
@@ -52,7 +53,8 @@ namespace PhotoImporter.Core.Tests
                 ShowImagePreview = true,
                 InputHistoryLimit = 24,
                 CustomExifCacheRoot = customCache,
-                LastAppliedPresetId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef")
+                LastAppliedPresetId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef"),
+                UiLanguage = "en"
             };
             settings.PreviousExifCacheRoots.Add(previousCache);
             settings.PreviousExifCacheRoots.Add(previousCache.ToUpperInvariant());
@@ -77,6 +79,7 @@ namespace PhotoImporter.Core.Tests
             Assert.Equal(24, loaded.InputHistoryLimit);
             Assert.Equal(Path.GetFullPath(customCache), loaded.CustomExifCacheRoot);
             Assert.Equal(settings.LastAppliedPresetId, loaded.LastAppliedPresetId);
+            Assert.Equal("en", loaded.UiLanguage);
             Assert.Single(loaded.PreviousExifCacheRoots);
             Assert.Equal(Path.GetFullPath(previousCache), loaded.PreviousExifCacheRoots[0], ignoreCase: true);
         }
@@ -158,6 +161,23 @@ namespace PhotoImporter.Core.Tests
             var settings = store.Load();
 
             Assert.Equal(SourceFileSelectionMode.MediaOnly, settings.SourceFileSelectionMode);
+        }
+
+        [Theory]
+        [InlineData("ja", "ja")]
+        [InlineData("EN", "en")]
+        [InlineData("future", "auto")]
+        public void UiLanguageIsNormalizedWithoutChangingSettingsVersion(string stored, string expected)
+        {
+            Directory.CreateDirectory(_root);
+            var settingsPath = Path.Combine(_root, "settings.xml");
+            File.WriteAllText(
+                settingsPath,
+                "<PhotoImporterSettings version=\"1\"><UiLanguage>" + stored + "</UiLanguage></PhotoImporterSettings>");
+
+            var settings = new PhotoImporterSettingsStore(settingsPath).Load();
+
+            Assert.Equal(expected, settings.UiLanguage);
         }
 
         [Theory]

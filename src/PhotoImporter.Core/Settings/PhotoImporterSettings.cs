@@ -27,6 +27,7 @@ namespace PhotoImporter.Core.Settings
             InputHistoryLimit = DefaultInputHistoryLimit;
             SidecarExtensions = new List<string> { ".xmp" };
             PreviousExifCacheRoots = new List<string>();
+            UiLanguage = "auto";
         }
 
         public string SourceFolder { get; set; }
@@ -42,6 +43,7 @@ namespace PhotoImporter.Core.Settings
         public int InputHistoryLimit { get; set; }
         public string CustomExifCacheRoot { get; set; }
         public Guid? LastAppliedPresetId { get; set; }
+        public string UiLanguage { get; set; }
         public IList<string> SidecarExtensions { get; }
         public IList<string> PreviousExifCacheRoots { get; }
 
@@ -110,6 +112,7 @@ namespace PhotoImporter.Core.Settings
                     CustomExifCacheRoot = NormalizeOptionalAbsolutePath(ReadOptional(root, "CustomExifCacheRoot")),
                     LastAppliedPresetId = ReadOptionalGuid(root, "LastAppliedPresetId")
                 };
+                settings.UiLanguage = NormalizeUiLanguage(ReadOptional(root, "UiLanguage"));
 
                 var sidecarExtensions = root.Element("SidecarExtensions");
                 if (sidecarExtensions != null)
@@ -195,6 +198,7 @@ namespace PhotoImporter.Core.Settings
                             settings.LastAppliedPresetId.HasValue
                                 ? settings.LastAppliedPresetId.Value.ToString("D")
                                 : string.Empty),
+                        new XElement("UiLanguage", NormalizeUiLanguage(settings.UiLanguage)),
                         new XElement("CustomExifCacheRoot", settings.CustomExifCacheRoot ?? string.Empty),
                         new XElement("PreviousExifCacheRoots",
                             settings.PreviousExifCacheRoots
@@ -292,6 +296,13 @@ namespace PhotoImporter.Core.Settings
             {
                 return null;
             }
+        }
+
+        private static string NormalizeUiLanguage(string value)
+        {
+            if (string.Equals(value, "ja", StringComparison.OrdinalIgnoreCase)) return "ja";
+            if (string.Equals(value, "en", StringComparison.OrdinalIgnoreCase)) return "en";
+            return "auto";
         }
     }
 }

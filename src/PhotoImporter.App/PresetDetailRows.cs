@@ -25,25 +25,25 @@ namespace PhotoImporter.App
             return new[]
             {
                 new PresetDetailRow(
-                    "コピー元",
+                    AppLocalization.Text("コピー元", "Source"),
                     preset.SaveSourceFolder
                         ? preset.SourceFolder ?? string.Empty
-                        : "（プリセットに保存しない）"),
-                new PresetDetailRow("コピー先", preset.DestinationFolder),
-                new PresetDetailRow("テンプレート", preset.TemplateText),
-                new PresetDetailRow("既存ファイルを上書きする", YesNo(preset.OverwriteExisting)),
+                        : AppLocalization.Text("（プリセットに保存しない）", "(Not saved in preset)")),
+                new PresetDetailRow(AppLocalization.Text("コピー先", "Destination"), preset.DestinationFolder),
+                new PresetDetailRow(AppLocalization.Text("テンプレート", "Template"), preset.TemplateText),
+                new PresetDetailRow(AppLocalization.Text("既存ファイルを上書きする", "Overwrite existing files"), YesNo(preset.OverwriteExisting)),
                 new PresetDetailRow(
-                    "画像・動画以外のファイルも含める",
+                    AppLocalization.Text("画像・動画以外のファイルも含める", "Include files other than images and videos"),
                     YesNo(preset.SourceFileSelectionMode == SourceFileSelectionMode.AllFiles)),
                 new PresetDetailRow(
-                    "同名のサイドカーファイルを画像に関連付ける",
+                    AppLocalization.Text("同名のサイドカーファイルを画像に関連付ける", "Associate same-named sidecar files with images"),
                     YesNo(preset.AssociateSidecars)),
-                new PresetDetailRow("対象拡張子", string.IsNullOrEmpty(extensions) ? "（指定なし）" : extensions),
+                new PresetDetailRow(AppLocalization.Text("対象拡張子", "Extensions"), string.IsNullOrEmpty(extensions) ? AppLocalization.Text("（指定なし）", "(None)") : extensions),
                 new PresetDetailRow(
-                    "RAW+JPEGペアではJPEGのみ解析する",
+                    AppLocalization.Text("RAW+JPEGペアではJPEGのみ解析する", "Analyze only the JPEG in RAW+JPEG pairs"),
                     YesNo(preset.AnalyzeJpegOnlyForRawJpegPair)),
                 new PresetDetailRow(
-                    "テンプレートで未使用の場合もExif情報を読み込む",
+                    AppLocalization.Text("テンプレートで未使用の場合もExif情報を読み込む", "Read Exif data even when unused by the template"),
                     YesNo(preset.ReadExifInformation))
             };
         }
@@ -53,16 +53,18 @@ namespace PhotoImporter.App
             if (preset == null) return Array.Empty<PresetDetailRow>();
             return new[]
             {
-                new PresetDetailRow("作成日時", preset.CreatedUtc.ToLocalTime().ToString("g")),
-                new PresetDetailRow("更新日時", preset.UpdatedUtc.ToLocalTime().ToString("g")),
+                new PresetDetailRow(AppLocalization.Text("作成日時", "Created"), preset.CreatedUtc.ToLocalTime().ToString("g")),
+                new PresetDetailRow(AppLocalization.Text("更新日時", "Updated"), preset.UpdatedUtc.ToLocalTime().ToString("g")),
                 new PresetDetailRow(
-                    "最終利用日時",
+                    AppLocalization.Text("最終利用日時", "Last used"),
                     preset.LastUsedUtc.HasValue
                         ? preset.LastUsedUtc.Value.ToLocalTime().ToString("g")
-                        : "未使用")
+                        : AppLocalization.Text("未使用", "Never"))
             };
         }
 
-        private static string YesNo(bool value) => value ? "はい" : "いいえ";
+        private static string YesNo(bool value) => value
+            ? AppLocalization.Text("はい", "Yes")
+            : AppLocalization.Text("いいえ", "No");
     }
 }

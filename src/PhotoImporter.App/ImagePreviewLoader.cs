@@ -65,7 +65,7 @@ namespace PhotoImporter.App
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(path))
-                throw new ArgumentException("プレビュー元のパスが必要です。", nameof(path));
+                throw new ArgumentException(AppLocalization.Text("プレビュー元のパスが必要です。", "A preview source path is required."), nameof(path));
             if (maximumWidth <= 0) throw new ArgumentOutOfRangeException(nameof(maximumWidth));
             if (maximumHeight <= 0) throw new ArgumentOutOfRangeException(nameof(maximumHeight));
 
@@ -74,9 +74,9 @@ namespace PhotoImporter.App
             var previewFileType = PhotoFileClassifier.Classify(fullPath);
             if (originalFileType == PhotoFileType.Video ||
                 previewFileType == PhotoFileType.Video)
-                return ImagePreviewLoadResult.Unavailable("動画のプレビューには対応していません。");
+                return ImagePreviewLoadResult.Unavailable(AppLocalization.Text("動画のプレビューには対応していません。", "Video preview is not supported."));
             if (previewFileType == PhotoFileType.Other)
-                return ImagePreviewLoadResult.Unavailable("このファイル形式は画像プレビューの対象外です。");
+                return ImagePreviewLoadResult.Unavailable(AppLocalization.Text("このファイル形式は画像プレビューの対象外です。", "This file format is not supported for image preview."));
 
             FileInfo info;
             try
@@ -84,12 +84,12 @@ namespace PhotoImporter.App
                 info = new FileInfo(fullPath);
                 info.Refresh();
                 if (!info.Exists)
-                    return ImagePreviewLoadResult.Unavailable("画像ファイルが見つかりません。");
+                    return ImagePreviewLoadResult.Unavailable(AppLocalization.Text("画像ファイルが見つかりません。", "The image file was not found."));
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
                                        ex is ArgumentException || ex is NotSupportedException)
             {
-                return ImagePreviewLoadResult.Unavailable("画像ファイルを確認できません: " + ex.Message);
+                return ImagePreviewLoadResult.Unavailable(AppLocalization.Text("画像ファイルを確認できません: ", "Unable to access the image file: ") + ex.Message);
             }
 
             var cacheKey = new ImagePreviewCacheKey(
@@ -122,7 +122,7 @@ namespace PhotoImporter.App
 
                 if (image == null)
                     return ImagePreviewLoadResult.Unavailable(
-                        "埋め込みプレビューを取得できませんでした。RAW本体の全体デコードは行いません。");
+                        AppLocalization.Text("埋め込みプレビューを取得できませんでした。RAW本体の全体デコードは行いません。", "The embedded preview could not be read. The full RAW image will not be decoded."));
 
                 AddToCache(cacheKey, image);
                 return ImagePreviewLoadResult.Success(image, sourceKind);
@@ -134,7 +134,7 @@ namespace PhotoImporter.App
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
                                        ex is NotSupportedException || ex is FileFormatException)
             {
-                return ImagePreviewLoadResult.Unavailable("画像プレビューを読み込めません: " + ex.Message);
+                return ImagePreviewLoadResult.Unavailable(AppLocalization.Text("画像プレビューを読み込めません: ", "Unable to load the image preview: ") + ex.Message);
             }
         }
 

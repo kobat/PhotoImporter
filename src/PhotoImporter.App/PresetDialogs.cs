@@ -29,18 +29,20 @@ namespace PhotoImporter.App
         public static PresetApplyChoice ConfirmApply(Window owner, string presetName)
         {
             var choice = PresetApplyChoice.Cancel;
-            var window = CreateDialog(owner, "プリセットを適用", 520);
+            var window = CreateDialog(owner, AppLocalization.Text("プリセットを適用", "Apply preset"), 520);
             var panel = new StackPanel { Margin = new Thickness(18) };
             panel.Children.Add(new TextBlock
             {
-                Text = "現在の設定には未保存の変更があります。\n「" + presetName + "」を適用しますか？",
+                Text = AppLocalization.IsEnglish
+                    ? "The current settings have unsaved changes.\nApply \"" + presetName + "\"?"
+                    : "現在の設定には未保存の変更があります。\n「" + presetName + "」を適用しますか？",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 18)
             });
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            buttons.Children.Add(CreateButton("適用", true, () => { choice = PresetApplyChoice.Apply; window.DialogResult = true; }));
-            buttons.Children.Add(CreateButton("保存してから適用", false, () => { choice = PresetApplyChoice.SaveThenApply; window.DialogResult = true; }));
-            buttons.Children.Add(CreateButton("キャンセル", false, () => window.DialogResult = false));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("適用", "Apply"), true, () => { choice = PresetApplyChoice.Apply; window.DialogResult = true; }));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("保存してから適用", "Save and apply"), false, () => { choice = PresetApplyChoice.SaveThenApply; window.DialogResult = true; }));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("キャンセル", "Cancel"), false, () => window.DialogResult = false));
             panel.Children.Add(buttons);
             window.Content = panel;
             window.ShowDialog();
@@ -57,13 +59,13 @@ namespace PhotoImporter.App
             PresetNameResult result = null;
             var window = CreateDialog(owner, title, 460);
             var panel = new StackPanel { Margin = new Thickness(18) };
-            panel.Children.Add(new TextBlock { Text = "プリセット名", Margin = new Thickness(0, 0, 0, 5) });
+            panel.Children.Add(new TextBlock { Text = AppLocalization.Text("プリセット名", "Preset name"), Margin = new Thickness(0, 0, 0, 5) });
             var nameBox = new TextBox { Text = initialName ?? string.Empty, MinWidth = 360, Padding = new Thickness(4, 2, 4, 2) };
             AutomationProperties.SetAutomationId(nameBox, "PresetName");
             panel.Children.Add(nameBox);
             var sourceCheck = new CheckBox
             {
-                Content = "コピー元フォルダーも保存する",
+                Content = AppLocalization.Text("コピー元フォルダーも保存する", "Save the source folder too"),
                 IsChecked = initialSaveSourceFolder,
                 Margin = new Thickness(0, 12, 0, 0),
                 Visibility = showSourceOption ? Visibility.Visible : Visibility.Collapsed
@@ -76,7 +78,7 @@ namespace PhotoImporter.App
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Margin = new Thickness(0, 18, 0, 0)
             };
-            buttons.Children.Add(CreateButton("保存", true, () =>
+            buttons.Children.Add(CreateButton(AppLocalization.Text("保存", "Save"), true, () =>
             {
                 result = new PresetNameResult
                 {
@@ -85,7 +87,7 @@ namespace PhotoImporter.App
                 };
                 window.DialogResult = true;
             }));
-            buttons.Children.Add(CreateButton("キャンセル", false, () => window.DialogResult = false));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("キャンセル", "Cancel"), false, () => window.DialogResult = false));
             panel.Children.Add(buttons);
             window.Content = panel;
             window.Loaded += (sender, args) =>
@@ -100,19 +102,21 @@ namespace PhotoImporter.App
         public static PresetImportChoice ConfirmImportConflict(Window owner, string importedName, string existingName)
         {
             var choice = PresetImportChoice.Skip;
-            var window = CreateDialog(owner, "プリセットをインポート", 540);
+            var window = CreateDialog(owner, AppLocalization.Text("プリセットをインポート", "Import preset"), 540);
             var panel = new StackPanel { Margin = new Thickness(18) };
             panel.Children.Add(new TextBlock
             {
-                Text = "インポートする「" + importedName + "」は既存の「" + existingName +
-                       "」と重複します。処理を選んでください。",
+                Text = AppLocalization.IsEnglish
+                    ? "The imported preset \"" + importedName + "\" conflicts with the existing preset \"" + existingName + "\". Choose an action."
+                    : "インポートする「" + importedName + "」は既存の「" + existingName +
+                      "」と重複します。処理を選んでください。",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 18)
             });
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            buttons.Children.Add(CreateButton("上書き", true, () => { choice = PresetImportChoice.Overwrite; window.DialogResult = true; }));
-            buttons.Children.Add(CreateButton("別名で追加", false, () => { choice = PresetImportChoice.AddWithAnotherName; window.DialogResult = true; }));
-            buttons.Children.Add(CreateButton("取り込まない", false, () => window.DialogResult = false));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("上書き", "Overwrite"), true, () => { choice = PresetImportChoice.Overwrite; window.DialogResult = true; }));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("別名で追加", "Add with another name"), false, () => { choice = PresetImportChoice.AddWithAnotherName; window.DialogResult = true; }));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("取り込まない", "Skip"), false, () => window.DialogResult = false));
             panel.Children.Add(buttons);
             window.Content = panel;
             window.ShowDialog();
@@ -122,17 +126,19 @@ namespace PhotoImporter.App
         public static bool ConfirmExitWithoutSaving(Window owner, string error)
         {
             var exit = false;
-            var window = CreateDialog(owner, "設定を保存できません", 520);
+            var window = CreateDialog(owner, AppLocalization.Text("設定を保存できません", "Unable to save settings"), 520);
             var panel = new StackPanel { Margin = new Thickness(18) };
             panel.Children.Add(new TextBlock
             {
-                Text = error + "\n\n現在の状態を settings.xml へ保存せず終了しますか？",
+                Text = AppLocalization.UserMessage(error) + AppLocalization.Text(
+                    "\n\n現在の状態を settings.xml へ保存せず終了しますか？",
+                    "\n\nExit without saving the current state to settings.xml?"),
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 18)
             });
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            buttons.Children.Add(CreateButton("保存せず終了", false, () => { exit = true; window.DialogResult = true; }));
-            buttons.Children.Add(CreateButton("修正する", true, () => window.DialogResult = false));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("保存せず終了", "Exit without saving"), false, () => { exit = true; window.DialogResult = true; }));
+            buttons.Children.Add(CreateButton(AppLocalization.Text("修正する", "Go back"), true, () => window.DialogResult = false));
             panel.Children.Add(buttons);
             window.Content = panel;
             window.ShowDialog();
@@ -159,7 +165,7 @@ namespace PhotoImporter.App
                 Padding = new Thickness(10, 4, 10, 4),
                 Margin = new Thickness(8, 0, 0, 0),
                 IsDefault = isDefault,
-                IsCancel = text == "キャンセル"
+                IsCancel = text == AppLocalization.Text("キャンセル", "Cancel")
             };
             button.Click += (sender, args) => action();
             AutomationProperties.SetAutomationId(button,

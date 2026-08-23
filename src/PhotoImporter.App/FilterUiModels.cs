@@ -35,44 +35,44 @@ namespace PhotoImporter.App
 
         public static IReadOnlyList<FilterFieldOption> CreateAll() => new[]
         {
-            Option(FilterField.FileType, "ファイル種別"),
-            Option(FilterField.Extension, "{Extension} 拡張子"),
-            Option(FilterField.CopyStatus, "コピー計画の状態"),
-            Option(FilterField.ExifReadStatus, "Exif読込状態"),
-            Option(FilterField.OriginalName, "{OriginalName} 元ファイル名"),
-            Option(FilterField.FileName, "{FileName} 拡張子なしファイル名"),
-            Option(FilterField.SourceRelativeDirectory, "{SourceRelativeDirectory} コピー元相対フォルダー"),
-            Option(FilterField.ModifiedDate, "{ModifiedDate} 更新日時"),
-            Option(FilterField.FileSize, "{FileSize} ファイルサイズ"),
-            Option(FilterField.Protected, "{Protected} 読み取り専用"),
-            Option(FilterField.Sequence, "{Sequence} 連番"),
-            Option(FilterField.TakenDate, "{TakenDate} Exif記録日時"),
-            Option(FilterField.TakenDateLocal, "{TakenDateLocal} PCタイムゾーン"),
-            Option(FilterField.TakenDateInTimeZone, "{TakenDateInTimeZone} 指定タイムゾーン"),
-            Option(FilterField.CameraMake, "{CameraMake} メーカー"),
-            Option(FilterField.CameraModel, "{CameraModel} カメラ"),
-            Option(FilterField.CameraSerial, "{CameraSerial} シリアル番号"),
-            Option(FilterField.Lens, "{Lens} レンズ"),
-            Option(FilterField.Width, "{Width} 向き反映後の幅"),
-            Option(FilterField.Height, "{Height} 向き反映後の高さ"),
-            Option(FilterField.ExifWidth, "{ExifWidth} Exif幅"),
-            Option(FilterField.ExifHeight, "{ExifHeight} Exif高さ"),
-            Option(FilterField.Orientation, "{Orientation} 向き"),
-            Option(FilterField.Aperture, "{Aperture} 絞り"),
-            Option(FilterField.ShutterSpeed, "{ShutterSpeed} シャッター秒数"),
-            Option(FilterField.ExposureTime, "{ExposureTime} 露光秒数"),
-            Option(FilterField.Iso, "{Iso} ISO"),
-            Option(FilterField.FocalLength, "{FocalLength} 焦点距離"),
-            Option(FilterField.FocalLength35mm, "{FocalLength35mm} 35mm換算焦点距離"),
-            Option(FilterField.Rating, "{Rating} 評価"),
-            Option(FilterField.HasGps, "{HasGps} GPS有無"),
-            Option(FilterField.GpsLatitude, "{GpsLatitude} 緯度"),
-            Option(FilterField.GpsLongitude, "{GpsLongitude} 経度"),
-            Option(FilterField.GpsAltitude, "{GpsAltitude} 高度")
+            Option(FilterField.FileType, "ファイル種別", "File type"),
+            Option(FilterField.Extension, "{Extension} 拡張子", "{Extension} Extension"),
+            Option(FilterField.CopyStatus, "コピー計画の状態", "Copy plan status"),
+            Option(FilterField.ExifReadStatus, "Exif読込状態", "Exif read status"),
+            Option(FilterField.OriginalName, "{OriginalName} 元ファイル名", "{OriginalName} Original file name"),
+            Option(FilterField.FileName, "{FileName} 拡張子なしファイル名", "{FileName} File name without extension"),
+            Option(FilterField.SourceRelativeDirectory, "{SourceRelativeDirectory} コピー元相対フォルダー", "{SourceRelativeDirectory} Source-relative folder"),
+            Option(FilterField.ModifiedDate, "{ModifiedDate} 更新日時", "{ModifiedDate} Modified date"),
+            Option(FilterField.FileSize, "{FileSize} ファイルサイズ", "{FileSize} File size"),
+            Option(FilterField.Protected, "{Protected} 読み取り専用", "{Protected} Read-only"),
+            Option(FilterField.Sequence, "{Sequence} 連番", "{Sequence} Sequence"),
+            Option(FilterField.TakenDate, "{TakenDate} Exif記録日時", "{TakenDate} Exif recorded date"),
+            Option(FilterField.TakenDateLocal, "{TakenDateLocal} PCタイムゾーン", "{TakenDateLocal} PC time zone"),
+            Option(FilterField.TakenDateInTimeZone, "{TakenDateInTimeZone} 指定タイムゾーン", "{TakenDateInTimeZone} Specified time zone"),
+            Option(FilterField.CameraMake, "{CameraMake} メーカー", "{CameraMake} Manufacturer"),
+            Option(FilterField.CameraModel, "{CameraModel} カメラ", "{CameraModel} Camera"),
+            Option(FilterField.CameraSerial, "{CameraSerial} シリアル番号", "{CameraSerial} Serial number"),
+            Option(FilterField.Lens, "{Lens} レンズ", "{Lens} Lens"),
+            Option(FilterField.Width, "{Width} 向き反映後の幅", "{Width} Oriented width"),
+            Option(FilterField.Height, "{Height} 向き反映後の高さ", "{Height} Oriented height"),
+            Option(FilterField.ExifWidth, "{ExifWidth} Exif幅", "{ExifWidth} Exif width"),
+            Option(FilterField.ExifHeight, "{ExifHeight} Exif高さ", "{ExifHeight} Exif height"),
+            Option(FilterField.Orientation, "{Orientation} 向き", "{Orientation} Orientation"),
+            Option(FilterField.Aperture, "{Aperture} 絞り", "{Aperture} Aperture"),
+            Option(FilterField.ShutterSpeed, "{ShutterSpeed} シャッター秒数", "{ShutterSpeed} Shutter speed"),
+            Option(FilterField.ExposureTime, "{ExposureTime} 露光秒数", "{ExposureTime} Exposure time"),
+            Option(FilterField.Iso, "{Iso} ISO", "{Iso} ISO"),
+            Option(FilterField.FocalLength, "{FocalLength} 焦点距離", "{FocalLength} Focal length"),
+            Option(FilterField.FocalLength35mm, "{FocalLength35mm} 35mm換算焦点距離", "{FocalLength35mm} 35mm-equivalent focal length"),
+            Option(FilterField.Rating, "{Rating} 評価", "{Rating} Rating"),
+            Option(FilterField.HasGps, "{HasGps} GPS有無", "{HasGps} GPS availability"),
+            Option(FilterField.GpsLatitude, "{GpsLatitude} 緯度", "{GpsLatitude} Latitude"),
+            Option(FilterField.GpsLongitude, "{GpsLongitude} 経度", "{GpsLongitude} Longitude"),
+            Option(FilterField.GpsAltitude, "{GpsAltitude} 高度", "{GpsAltitude} Altitude")
         };
 
-        private static FilterFieldOption Option(FilterField field, string name) =>
-            new FilterFieldOption(field, name);
+        private static FilterFieldOption Option(FilterField field, string japanese, string english) =>
+            new FilterFieldOption(field, AppLocalization.Text(japanese, english));
     }
 
     public sealed class FilterChoiceOption : INotifyPropertyChanged
@@ -124,15 +124,15 @@ namespace PhotoImporter.App
             _fieldOptions = fieldOptions ?? throw new ArgumentNullException(nameof(fieldOptions));
             StringMatchModes = new[]
             {
-                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Exact, "完全一致"),
-                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Contains, "部分一致"),
-                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Wildcard, "ワイルドカード"),
-                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.RegularExpression, "正規表現")
+                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Exact, AppLocalization.Text("完全一致", "Exact match")),
+                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Contains, AppLocalization.Text("部分一致", "Contains")),
+                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Wildcard, AppLocalization.Text("ワイルドカード", "Wildcard")),
+                new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.RegularExpression, AppLocalization.Text("正規表現", "Regular expression"))
             };
             TargetModes = new[]
             {
-                new DisplayOption<bool>(true, "一致する項目を対象にする"),
-                new DisplayOption<bool>(false, "一致する項目を対象から外す")
+                new DisplayOption<bool>(true, AppLocalization.Text("一致する項目を対象にする", "Include matching items")),
+                new DisplayOption<bool>(false, AppLocalization.Text("一致する項目を対象から外す", "Exclude matching items"))
             };
             _selectedStringMatchMode = StringMatchModes[0];
             _selectedTargetMode = TargetModes[0];
@@ -223,11 +223,13 @@ namespace PhotoImporter.App
             {
                 var value = BuildValueSummary();
                 var options = new List<string>();
-                if (IncludeUnknown) options.Add("Unknownを含む");
-                if (CaseSensitive && CanUseCaseSensitivity) options.Add("大文字・小文字を区別");
-                if (SelectedTargetMode != null && !SelectedTargetMode.Value) options.Add("一致項目を除外");
+                if (IncludeUnknown) options.Add(AppLocalization.Text("Unknownを含む", "include Unknown"));
+                if (CaseSensitive && CanUseCaseSensitivity) options.Add(AppLocalization.Text("大文字・小文字を区別", "match case"));
+                if (SelectedTargetMode != null && !SelectedTargetMode.Value) options.Add(AppLocalization.Text("一致項目を除外", "exclude matches"));
                 return SelectedField.DisplayName + ": " + value +
-                       (options.Count == 0 ? string.Empty : "（" + string.Join("、", options) + "）");
+                       (options.Count == 0 ? string.Empty : AppLocalization.IsEnglish
+                           ? " (" + string.Join(", ", options) + ")"
+                           : "（" + string.Join("、", options) + "）");
             }
         }
 
@@ -275,8 +277,8 @@ namespace PhotoImporter.App
                             !TryParseNumber(MaximumText, field, out maximum))
                         {
                             error = field == FilterField.FileSize
-                                ? "数値を B、KiB、MiB、GiB のいずれかで入力してください。"
-                                : "数値を入力してください。";
+                                ? AppLocalization.Text("数値を B、KiB、MiB、GiB のいずれかで入力してください。", "Enter a number in B, KiB, MiB, or GiB.")
+                                : AppLocalization.Text("数値を入力してください。", "Enter a number.");
                             return false;
                         }
                         condition = new NumberFilterCondition(
@@ -289,7 +291,9 @@ namespace PhotoImporter.App
                         if (!TryCombineDateAndTime(StartDate, StartTimeText, out start) ||
                             !TryCombineDateAndTime(EndDate, EndTimeText, out end))
                         {
-                            error = "時刻は HH:mm または HH:mm:ss で入力し、時刻を使う場合は日付も指定してください。";
+                            error = AppLocalization.Text(
+                                "時刻は HH:mm または HH:mm:ss で入力し、時刻を使う場合は日付も指定してください。",
+                                "Enter time as HH:mm or HH:mm:ss, and specify a date when using a time.");
                             return false;
                         }
                         var endHasTime = !string.IsNullOrWhiteSpace(EndTimeText);
@@ -369,26 +373,30 @@ namespace PhotoImporter.App
             switch (ValueType)
             {
                 case FilterValueType.String:
-                    return (SelectedStringMatchMode?.DisplayName ?? "文字列") + "「" + Pattern + "」";
+                    return AppLocalization.IsEnglish
+                        ? (SelectedStringMatchMode?.DisplayName ?? "Text") + " \"" + Pattern + "\""
+                        : (SelectedStringMatchMode?.DisplayName ?? "文字列") + "「" + Pattern + "」";
                 case FilterValueType.Number:
                     var numberParts = new List<string>();
                     if (!string.IsNullOrWhiteSpace(MinimumText) && !string.IsNullOrWhiteSpace(MaximumText))
-                        numberParts.Add(MinimumText.Trim() + "～" + MaximumText.Trim());
+                        numberParts.Add(MinimumText.Trim() + AppLocalization.Text("～", " to ") + MaximumText.Trim());
                     else if (!string.IsNullOrWhiteSpace(MinimumText))
-                        numberParts.Add(MinimumText.Trim() + "以上");
+                        numberParts.Add(MinimumText.Trim() + AppLocalization.Text("以上", " or more"));
                     else if (!string.IsNullOrWhiteSpace(MaximumText))
-                        numberParts.Add(MaximumText.Trim() + "以下");
-                    if (IncludeNoSequence) numberParts.Add("連番なし");
+                        numberParts.Add(MaximumText.Trim() + AppLocalization.Text("以下", " or less"));
+                    if (IncludeNoSequence) numberParts.Add(AppLocalization.Text("連番なし", "no sequence number"));
                     if (IncludeRejectedRating) numberParts.Add("Rejected");
-                    return numberParts.Count == 0 ? "値未指定" : string.Join(" または ", numberParts);
+                    return numberParts.Count == 0
+                        ? AppLocalization.Text("値未指定", "No value")
+                        : string.Join(AppLocalization.Text(" または ", " or "), numberParts);
                 case FilterValueType.DateTime:
                     var start = FormatDateBoundary(StartDate, StartTimeText);
                     var end = FormatDateBoundary(EndDate, EndTimeText);
                     var range = !string.IsNullOrEmpty(start) && !string.IsNullOrEmpty(end)
-                        ? start + "～" + end
-                        : !string.IsNullOrEmpty(start) ? start + "以降"
-                        : !string.IsNullOrEmpty(end) ? end + "以前"
-                        : "日時未指定";
+                        ? start + AppLocalization.Text("～", " to ") + end
+                        : !string.IsNullOrEmpty(start) ? start + AppLocalization.Text("以降", " or later")
+                        : !string.IsNullOrEmpty(end) ? end + AppLocalization.Text("以前", " or earlier")
+                        : AppLocalization.Text("日時未指定", "No date/time");
                     return IsTimeZoneDate && !string.IsNullOrWhiteSpace(TimeZoneSpecifier)
                         ? range + " [" + TimeZoneSpecifier.Trim() + "]"
                         : range;
@@ -396,7 +404,9 @@ namespace PhotoImporter.App
                     var selected = Choices.Where(item => item.IsSelected)
                         .Select(item => item.DisplayName)
                         .ToList();
-                    return selected.Count == 0 ? "選択なし" : string.Join(" または ", selected);
+                    return selected.Count == 0
+                        ? AppLocalization.Text("選択なし", "None selected")
+                        : string.Join(AppLocalization.Text(" または ", " or "), selected);
             }
         }
 
@@ -415,15 +425,15 @@ namespace PhotoImporter.App
             {
                 case FilterField.FileType:
                     AddChoice(PhotoFileType.Jpeg, "JPEG"); AddChoice(PhotoFileType.Raw, "RAW");
-                    AddChoice(PhotoFileType.OtherImage, "その他の画像"); AddChoice(PhotoFileType.Video, "動画");
-                    AddChoice(PhotoFileType.Other, "その他"); break;
+                    AddChoice(PhotoFileType.OtherImage, AppLocalization.Text("その他の画像", "Other image")); AddChoice(PhotoFileType.Video, AppLocalization.Text("動画", "Video"));
+                    AddChoice(PhotoFileType.Other, AppLocalization.Text("その他", "Other")); break;
                 case FilterField.CopyStatus:
-                    AddChoice(FilterCopyStatus.NotImported, "未取込"); AddChoice(FilterCopyStatus.Overwrite, "上書き対象");
-                    AddChoice(FilterCopyStatus.Imported, "取込済"); AddChoice(FilterCopyStatus.Conflict, "競合");
-                    AddChoice(FilterCopyStatus.ScanError, "スキャンエラー"); AddChoice(FilterCopyStatus.CopyError, "コピーエラー"); break;
+                    AddChoice(FilterCopyStatus.NotImported, AppLocalization.Text("未取込", "Not imported")); AddChoice(FilterCopyStatus.Overwrite, AppLocalization.Text("上書き対象", "Overwrite"));
+                    AddChoice(FilterCopyStatus.Imported, AppLocalization.Text("取込済", "Imported")); AddChoice(FilterCopyStatus.Conflict, AppLocalization.Text("競合", "Conflict"));
+                    AddChoice(FilterCopyStatus.ScanError, AppLocalization.Text("スキャンエラー", "Scan error")); AddChoice(FilterCopyStatus.CopyError, AppLocalization.Text("コピーエラー", "Copy error")); break;
                 case FilterField.ExifReadStatus:
-                    AddChoice(FilterExifReadStatus.Read, "読込済み"); AddChoice(FilterExifReadStatus.NoMetadata, "Exif情報なし");
-                    AddChoice(FilterExifReadStatus.Unsupported, "未対応形式"); AddChoice(FilterExifReadStatus.ReadError, "読取エラー"); break;
+                    AddChoice(FilterExifReadStatus.Read, AppLocalization.Text("読込済み", "Loaded")); AddChoice(FilterExifReadStatus.NoMetadata, AppLocalization.Text("Exif情報なし", "No Exif data"));
+                    AddChoice(FilterExifReadStatus.Unsupported, AppLocalization.Text("未対応形式", "Unsupported format")); AddChoice(FilterExifReadStatus.ReadError, AppLocalization.Text("読取エラー", "Read error")); break;
                 case FilterField.Protected:
                     AddChoice(true, "Protected"); AddChoice(false, "Unprotected"); break;
                 case FilterField.HasGps:
@@ -444,15 +454,17 @@ namespace PhotoImporter.App
         {
             switch (code)
             {
-                case FilterValidationCode.NoChoices: return "少なくとも1つ選択してください。";
-                case FilterValidationCode.RangeIsEmpty: return "最小値・最大値・特別値のいずれかを指定してください。";
-                case FilterValidationCode.MinimumExceedsMaximum: return "開始・最小値は終了・最大値以下にしてください。";
-                case FilterValidationCode.InvalidRegularExpression: return "正規表現が正しくありません。";
-                case FilterValidationCode.TimeZoneRequired: return "タイムゾーンを指定してください。";
-                case FilterValidationCode.InvalidTimeZone: return "タイムゾーン指定が正しくありません。";
+                case FilterValidationCode.NoChoices: return AppLocalization.Text("少なくとも1つ選択してください。", "Select at least one option.");
+                case FilterValidationCode.RangeIsEmpty: return AppLocalization.Text("最小値・最大値・特別値のいずれかを指定してください。", "Specify a minimum, maximum, or special value.");
+                case FilterValidationCode.MinimumExceedsMaximum: return AppLocalization.Text("開始・最小値は終了・最大値以下にしてください。", "The start or minimum must not exceed the end or maximum.");
+                case FilterValidationCode.InvalidRegularExpression: return AppLocalization.Text("正規表現が正しくありません。", "The regular expression is invalid.");
+                case FilterValidationCode.TimeZoneRequired: return AppLocalization.Text("タイムゾーンを指定してください。", "Specify a time zone.");
+                case FilterValidationCode.InvalidTimeZone: return AppLocalization.Text("タイムゾーン指定が正しくありません。", "The time zone specification is invalid.");
                 case FilterValidationCode.OptionNotSupported:
-                    return "「連番なし」と「Rejected」は、それぞれ {Sequence} と {Rating} でのみ使用できます。";
-                default: return "この条件を適用できません。";
+                    return AppLocalization.Text(
+                        "「連番なし」と「Rejected」は、それぞれ {Sequence} と {Rating} でのみ使用できます。",
+                        "No sequence number and Rejected are available only for {Sequence} and {Rating}, respectively.");
+                default: return AppLocalization.Text("この条件を適用できません。", "This condition cannot be applied.");
             }
         }
 

@@ -49,7 +49,9 @@ namespace PhotoImporter.App
             {
                 if (item.TemplateContext == null)
                     throw new InvalidOperationException(
-                        "Exif 情報を関連付けるためのスキャン時情報がありません。手動で再スキャンしてください。");
+                        AppLocalization.Text(
+                            "Exif 情報を関連付けるためのスキャン時情報がありません。手動で再スキャンしてください。",
+                            "The scan information needed to attach Exif data is missing. Scan again manually."));
 
                 var fullPath = Path.GetFullPath(Path.Combine(normalizedSourceRoot, item.SourcePath));
                 targets.Add(new LazyExifTarget(
@@ -64,7 +66,9 @@ namespace PhotoImporter.App
                 .FirstOrDefault(group => group.Count() > 1);
             if (duplicate != null)
                 throw new InvalidOperationException(
-                    "同じコピー元ファイルが一覧に複数あります。手動で再スキャンしてください: " + duplicate.Key);
+                    AppLocalization.Text(
+                        "同じコピー元ファイルが一覧に複数あります。手動で再スキャンしてください: ",
+                        "The same source file appears more than once in the list. Scan again manually: ") + duplicate.Key);
 
             return new LazyExifPreviewLoadPlan(
                 normalizedSourceRoot,
@@ -93,7 +97,9 @@ namespace PhotoImporter.App
                  IsSameOrUnder(exifCacheRoot, _destinationRoot) || IsSameOrUnder(_destinationRoot, exifCacheRoot)))
             {
                 warnings.Add(string.Format(
-                    "Exif キャッシュの保存先 ({0}) がコピー元またはコピー先と重なるため、キャッシュなしで続行しました。",
+                    AppLocalization.Text(
+                        "Exif キャッシュの保存先 ({0}) がコピー元またはコピー先と重なるため、キャッシュなしで続行しました。",
+                        "The Exif cache location ({0}) overlaps the source or destination, so the operation continued without the cache."),
                     exifCacheRoot));
             }
             else if (useExifCache)
@@ -107,7 +113,9 @@ namespace PhotoImporter.App
                                                ex is UnauthorizedAccessException)
                 {
                     warnings.Add(
-                        "コピー元のボリューム情報を取得できないため、Exif キャッシュなしで続行しました: " +
+                        AppLocalization.Text(
+                            "コピー元のボリューム情報を取得できないため、Exif キャッシュなしで続行しました: ",
+                            "The source volume information could not be read, so the operation continued without the Exif cache: ") +
                         ex.Message);
                     cacheStore = null;
                 }
@@ -158,12 +166,16 @@ namespace PhotoImporter.App
                         info.Length != target.FileSize ||
                         info.LastWriteTimeUtc != target.LastWriteTimeUtc)
                         throw new IOException(
-                            "Exif 読込の対象ファイルが手動スキャン後に変更または削除されました。");
+                            AppLocalization.Text(
+                                "Exif 読込の対象ファイルが手動スキャン後に変更または削除されました。",
+                                "A file being read for Exif data was changed or deleted after the manual scan."));
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
                     throw new IOException(
-                        "一覧へ安全に Exif 情報を関連付けられません。手動で再スキャンしてください: " +
+                        AppLocalization.Text(
+                            "一覧へ安全に Exif 情報を関連付けられません。手動で再スキャンしてください: ",
+                            "Exif data cannot be attached to the list safely. Scan again manually: ") +
                         target.Item.SourcePath,
                         ex);
                 }
@@ -222,7 +234,9 @@ namespace PhotoImporter.App
             if (filter == null) throw new ArgumentNullException(nameof(filter));
             if (!currentItems.SequenceEqual(_originalItems))
                 throw new InvalidOperationException(
-                    "Exif 読込中に一覧が変更されました。手動で再スキャンしてください。");
+                    AppLocalization.Text(
+                        "Exif 読込中に一覧が変更されました。手動で再スキャンしてください。",
+                        "The list changed while Exif data was being read. Scan again manually."));
 
             var byItem = Attachments.ToDictionary(item => item.Item);
             foreach (var item in _originalItems)

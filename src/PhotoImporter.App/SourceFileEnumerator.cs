@@ -140,7 +140,9 @@ namespace PhotoImporter.App
         private void EnsureSourceRootAvailable(string sourceRoot)
         {
             if (!_fileSystem.DirectoryExists(sourceRoot))
-                throw new IOException("コピー元全体を利用できなくなったため、スキャンを中止しました: " + sourceRoot);
+                throw new IOException(AppLocalization.Text(
+                    "コピー元全体を利用できなくなったため、スキャンを中止しました: ",
+                    "The scan was stopped because the source is no longer available: ") + sourceRoot);
         }
 
         private static string MakeRelative(string root, string path)

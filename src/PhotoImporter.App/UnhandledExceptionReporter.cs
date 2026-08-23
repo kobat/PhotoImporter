@@ -21,9 +21,10 @@ namespace PhotoImporter.App
             try
             {
                 showError(
-                    "回復できないエラーが発生したため、アプリを終了します。\n" +
-                    "コピー先に残った一時ファイルは自動削除しません。\n\n" +
-                    "診断ログ: " + logPath + "\n\n" + exception.Message);
+                    AppLocalization.Text(
+                        "回復できないエラーが発生したため、アプリを終了します。\nコピー先に残った一時ファイルは自動削除しません。\n\n診断ログ: ",
+                        "The application will close because an unrecoverable error occurred.\nTemporary files left in the destination will not be deleted automatically.\n\nDiagnostic log: ") +
+                    logPath + "\n\n" + AppLocalization.UserMessage(exception.Message));
             }
             catch
             {

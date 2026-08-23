@@ -29,30 +29,34 @@ namespace PhotoImporter.App
             Array.AsReadOnly(new[]
             {
                 new LicenseInformationItem(
-                    "このアプリのライセンス",
+                    AppLocalization.Text("このアプリのライセンス", "Application license"),
                     "Photo Importer 0.1.0",
                     "Copyright © 2026 KOBAT — MIT License",
                     "PhotoImporterMIT.txt"),
                 new LicenseInformationItem(
-                    "第三者ライブラリのライセンス",
+                    AppLocalization.Text("第三者ライブラリのライセンス", "Third-party library licenses"),
                     "MetadataExtractor 2.9.3",
                     "Copyright Drew Noakes 2002–2026; 2014 Imazen LLC — Apache License 2.0",
                     "MetadataExtractorApache2.txt"),
                 new LicenseInformationItem(
-                    "第三者ライブラリのライセンス",
+                    AppLocalization.Text("第三者ライブラリのライセンス", "Third-party library licenses"),
                     "XmpCore 6.1.10.1",
-                    "Copyright 2015–2021 XmpCore contributors / Adobe XMP SDK 由来 — BSD 3-Clause License",
+                    AppLocalization.Text(
+                        "Copyright 2015–2021 XmpCore contributors / Adobe XMP SDK 由来 — BSD 3-Clause License",
+                        "Copyright 2015–2021 XmpCore contributors / Derived from Adobe XMP SDK — BSD 3-Clause License"),
                     "XmpCoreBSD.txt"),
                 new LicenseInformationItem(
-                    "第三者ライブラリのライセンス",
-                    "Microsoft .NET 補助ライブラリ",
+                    AppLocalization.Text("第三者ライブラリのライセンス", "Third-party library licenses"),
+                    AppLocalization.Text("Microsoft .NET 補助ライブラリ", "Microsoft .NET support libraries"),
                     "System.Buffers 4.6.1 / System.Memory 4.6.3 / System.Numerics.Vectors 4.6.1 / " +
                     "System.Runtime.CompilerServices.Unsafe 6.1.2 / System.Text.Encoding.CodePages 10.0.5 — MIT License",
                     "MicrosoftMIT.txt"),
                 new LicenseInformationItem(
-                    "第三者ライブラリのライセンス",
-                    "Microsoft 第三者ライブラリ",
-                    "System.Text.Encoding.CodePages 10.0.5 に同梱された第三者ライセンス通知",
+                    AppLocalization.Text("第三者ライブラリのライセンス", "Third-party library licenses"),
+                    AppLocalization.Text("Microsoft 第三者ライブラリ", "Microsoft third-party libraries"),
+                    AppLocalization.Text(
+                        "System.Text.Encoding.CodePages 10.0.5 に同梱された第三者ライセンス通知",
+                        "Third-party license notices included with System.Text.Encoding.CodePages 10.0.5"),
                     "MicrosoftThirdPartyNotices.txt")
             });
 

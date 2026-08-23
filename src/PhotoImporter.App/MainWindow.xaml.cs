@@ -86,6 +86,7 @@ namespace PhotoImporter.App
         private string _appliedFilterStateKey = string.Empty;
         private OverlayPanel _activeOverlay;
         private SystemMenuAboutCommand _systemMenuAboutCommand;
+        private string _uiLanguage = AppLocalization.Automatic;
 
         private enum OverlayPanel
         {
@@ -97,8 +98,6 @@ namespace PhotoImporter.App
 
         public MainWindow()
         {
-            FileSystemTokenDetails = TokenDetailItem.CreateFileSystemItems();
-            ExifTokenDetails = TokenDetailItem.CreateExifItems();
             _settingsStore = new PhotoImporterSettingsStore(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PhotoImporter",
@@ -118,13 +117,25 @@ namespace PhotoImporter.App
             }
             catch (InvalidDataException ex)
             {
-                settingsWarning = ex.Message + " 既定値で起動しました。";
+                settingsWarning = ex.Message + AppLocalization.Text(" 既定値で起動しました。", " Started with default settings.");
             }
 
+            AppLocalization.Configure(GetCommandLineLanguageOverride() ?? _uiLanguage);
+            _message = AppLocalization.Text(
+                "コピー元とコピー先を選択して、スキャンしてください。",
+                "Select a source and destination, then scan.");
+            _summary = AppLocalization.Text("0 件", "0 items");
+            _presetManagerSortMode = AppLocalization.Text("名前順", "Name");
+            _imagePreviewStatus = AppLocalization.Text(
+                "一覧から画像を選択してください。",
+                "Select an image from the list.");
+            FileSystemTokenDetails = TokenDetailItem.CreateFileSystemItems();
+            ExifTokenDetails = TokenDetailItem.CreateExifItems();
             InitializeComponent();
+            WpfLocalizer.Localize(this);
             _systemMenuAboutCommand = new SystemMenuAboutCommand(
                 this,
-                "バージョン情報(&A)...",
+                AppLocalization.Text("バージョン情報(&A)...", "About(&A)..."),
                 ShowAboutWindow);
             _itemCollectionState = new PreviewItemCollectionState(Items);
             FilterFieldOptions = FilterFieldOption.CreateAll();
@@ -136,7 +147,7 @@ namespace PhotoImporter.App
             }
             catch (InvalidDataException ex)
             {
-                historyWarning = ex.Message + " 入力履歴なしで起動しました。";
+                historyWarning = ex.Message + AppLocalization.Text(" 入力履歴なしで起動しました。", " Started without input history.");
             }
             ReloadPresets(_lastAppliedPresetId, true, true);
             Closing += MainWindow_Closing;
@@ -152,7 +163,21 @@ namespace PhotoImporter.App
 
         private void ShowAboutWindow()
         {
-            new AboutWindow { Owner = this }.ShowDialog();
+            new AboutWindow(_uiLanguage, language => _uiLanguage = language) { Owner = this }.ShowDialog();
+        }
+
+        internal static string GetCommandLineLanguageOverride()
+        {
+            const string prefix = "--language=";
+            var argument = Environment.GetCommandLineArgs()
+                .FirstOrDefault(item => item.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            if (argument == null) return null;
+            var value = argument.Substring(prefix.Length);
+            if (string.Equals(value, AppLocalization.Japanese, StringComparison.OrdinalIgnoreCase))
+                return AppLocalization.Japanese;
+            if (string.Equals(value, AppLocalization.English, StringComparison.OrdinalIgnoreCase))
+                return AppLocalization.English;
+            return null;
         }
 
         public ObservableCollection<PreviewItem> Items { get; } = new ObservableCollection<PreviewItem>();
@@ -162,7 +187,11 @@ namespace PhotoImporter.App
         public ObservableCollection<string> SourceFolderHistory { get; } = new ObservableCollection<string>();
         public ObservableCollection<string> DestinationFolderHistory { get; } = new ObservableCollection<string>();
         public ObservableCollection<string> TemplateHistory { get; } = new ObservableCollection<string>();
-        public IReadOnlyList<string> PresetManagerSortModes { get; } = new[] { "名前順", "最終利用日順" };
+        public IReadOnlyList<string> PresetManagerSortModes { get; } = new[]
+        {
+            AppLocalization.Text("名前順", "Name"),
+            AppLocalization.Text("最終利用日順", "Last used")
+        };
         internal IReadOnlyList<FilterFieldOption> FilterFieldOptions { get; private set; }
         public ICollectionView ItemsView => _itemCollectionState.View;
         public IReadOnlyList<TokenDetailItem> FileSystemTokenDetails { get; }
@@ -312,7 +341,7 @@ namespace PhotoImporter.App
         }
 
         public string SelectedSourcePath => SelectedPreviewItem == null
-            ? "一覧からファイルを選択してください。"
+            ? AppLocalization.Text("一覧からファイルを選択してください。", "Select a file from the list.")
             : SelectedPreviewItem.SourcePath;
 
         public string ExifReadStatus
@@ -320,18 +349,18 @@ namespace PhotoImporter.App
             get
             {
                 if (SelectedPreviewItem == null) return string.Empty;
-                if (SelectedPreviewItem.IsScanError) return "ファイル情報を取得できません。";
+                if (SelectedPreviewItem.IsScanError) return AppLocalization.Text("ファイル情報を取得できません。", "File information is unavailable.");
                 var result = SelectedPreviewItem.MetadataResult;
-                if (result == null) return "Exif情報は読み込まれていません。";
+                if (result == null) return AppLocalization.Text("Exif情報は読み込まれていません。", "Exif data has not been read.");
                 var source = string.IsNullOrWhiteSpace(SelectedPreviewItem.MetadataSourcePath)
                     ? string.Empty
-                    : " / 解析元: " + SelectedPreviewItem.MetadataSourcePath;
+                    : AppLocalization.Text(" / 解析元: ", " / Source: ") + SelectedPreviewItem.MetadataSourcePath;
                 switch (result.Status)
                 {
-                    case PhotoMetadataReadStatus.Success: return "Exif読込済み" + source;
-                    case PhotoMetadataReadStatus.NoMetadata: return "Exif情報なし" + source;
-                    case PhotoMetadataReadStatus.Unsupported: return "Exif未対応形式" + source;
-                    default: return "Exif読取エラー: " + result.Error.Message + source;
+                    case PhotoMetadataReadStatus.Success: return AppLocalization.Text("Exif読込済み", "Exif loaded") + source;
+                    case PhotoMetadataReadStatus.NoMetadata: return AppLocalization.Text("Exif情報なし", "No Exif data") + source;
+                    case PhotoMetadataReadStatus.Unsupported: return AppLocalization.Text("Exif未対応形式", "Unsupported Exif format") + source;
+                    default: return AppLocalization.Text("Exif読取エラー: ", "Exif read error: ") + result.Error.Message + source;
                 }
             }
         }
@@ -339,11 +368,12 @@ namespace PhotoImporter.App
         public string ExifCacheRoot => string.IsNullOrWhiteSpace(_customExifCacheRoot)
             ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "ExifCache"))
             : Path.GetFullPath(_customExifCacheRoot);
-        public string ExifSettingsSummary => string.Format(
+        public string ExifSettingsSummary => AppLocalization.Format(
             "Exif: {0} / キャッシュ {1} / 保存先: {2}",
-            ReadExifInformation ? "常に読込" : "必要時のみ読込",
+            "Exif: {0} / Cache {1} / Location: {2}",
+            ReadExifInformation ? AppLocalization.Text("常に読込", "Always") : AppLocalization.Text("必要時のみ読込", "When needed"),
             UseExifCache ? "ON" : "OFF",
-            string.IsNullOrWhiteSpace(_customExifCacheRoot) ? "既定" : ExifCacheRoot);
+            string.IsNullOrWhiteSpace(_customExifCacheRoot) ? AppLocalization.Text("既定", "Default") : ExifCacheRoot);
         public string ExifSettingsToolTip => ExifSettingsSummary + Environment.NewLine + ExifCacheRoot;
 
         public string Message { get => _message; private set => Set(ref _message, value); }
@@ -418,8 +448,10 @@ namespace PhotoImporter.App
             }
         }
         public string PresetStatusText => SelectedPreset == null
-            ? HasPresetChanges ? "(プリセットなし) ● 未保存の変更" : "(プリセットなし)"
-            : HasPresetChanges ? "● 未保存の変更" : string.Empty;
+            ? HasPresetChanges
+                ? AppLocalization.Text("(プリセットなし) ● 未保存の変更", "(No preset) ● Unsaved changes")
+                : AppLocalization.Text("(プリセットなし)", "(No preset)")
+            : HasPresetChanges ? AppLocalization.Text("● 未保存の変更", "● Unsaved changes") : string.Empty;
         public Visibility PresetStatusVisibility => string.IsNullOrEmpty(PresetStatusText)
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -443,11 +475,11 @@ namespace PhotoImporter.App
         {
             get
             {
-                if (_appliedFilterConditionSummaries.Count == 0) return "フィルター: 条件なし";
+                if (_appliedFilterConditionSummaries.Count == 0) return AppLocalization.Text("フィルター: 条件なし", "Filter: no conditions");
                 var shown = string.Join(" / ", _appliedFilterConditionSummaries.Take(2));
                 var remainder = _appliedFilterConditionSummaries.Count - 2;
-                return "フィルター: " + shown +
-                       (remainder > 0 ? string.Format(" / ほか{0}件", remainder) : string.Empty);
+                return AppLocalization.Text("フィルター: ", "Filter: ") + shown +
+                       (remainder > 0 ? AppLocalization.Format(" / ほか{0}件", " / {0} more", remainder) : string.Empty);
             }
         }
         public string FilterSummaryToolTip
@@ -455,17 +487,17 @@ namespace PhotoImporter.App
             get
             {
                 var applied = _appliedFilterConditionSummaries.Count == 0
-                    ? "適用中の条件はありません。"
-                    : "適用中:" + Environment.NewLine +
+                    ? AppLocalization.Text("適用中の条件はありません。", "No conditions are applied.")
+                    : AppLocalization.Text("適用中:", "Applied:") + Environment.NewLine +
                       string.Join(Environment.NewLine, _appliedFilterConditionSummaries.Select((item, index) =>
                           string.Format("{0}. {1}", index + 1, item)));
                 if (!HasUnappliedFilterChanges) return applied;
                 var draft = FilterConditions.Count == 0
-                    ? "条件なし"
+                    ? AppLocalization.Text("条件なし", "No conditions")
                     : string.Join(Environment.NewLine, FilterConditions.Select((item, index) =>
                         string.Format("{0}. {1}", index + 1, item.Summary)));
                 return applied + Environment.NewLine + Environment.NewLine +
-                       "未適用の編集:" + Environment.NewLine + draft;
+                       AppLocalization.Text("未適用の編集:", "Unapplied edits:") + Environment.NewLine + draft;
             }
         }
         public bool HasUnappliedFilterChanges => !string.Equals(
@@ -473,8 +505,8 @@ namespace PhotoImporter.App
             BuildCurrentFilterStateKey(),
             StringComparison.Ordinal);
         public string FilterEditStatus => HasUnappliedFilterChanges
-            ? string.Format("未適用の変更あり（編集中 {0} 件）", FilterConditions.Count)
-            : string.Format("適用済み {0} 件", AppliedFilterCount);
+            ? AppLocalization.Format("未適用の変更あり（編集中 {0} 件）", "Unapplied changes ({0} editing)", FilterConditions.Count)
+            : AppLocalization.Format("適用済み {0} 件", "{0} applied", AppliedFilterCount);
         public Visibility FilterEditStatusVisibility => HasUnappliedFilterChanges
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -524,9 +556,9 @@ namespace PhotoImporter.App
             {
                 if (_isCopying)
                     return _copyPauseController != null && _copyPauseController.IsPauseRequested
-                        ? "再開"
-                        : "一時停止";
-                return string.Format("コピー ({0})", _itemCollectionState.GetCounts().Selected);
+                        ? AppLocalization.Text("再開", "Resume")
+                        : AppLocalization.Text("一時停止", "Pause");
+                return AppLocalization.Format("コピー ({0})", "Copy ({0})", _itemCollectionState.GetCounts().Selected);
             }
         }
         public string ViewSelectionSummary
@@ -534,8 +566,9 @@ namespace PhotoImporter.App
             get
             {
                 var counts = _itemCollectionState.GetCounts();
-                return string.Format(
+                return AppLocalization.Format(
                     "表示 {0} / 全 {1}　チェック {2}（表示外 {3}）",
+                    "Visible {0} / Total {1}  Selected {2} ({3} hidden)",
                     counts.Visible,
                     counts.Total,
                     counts.Selected,
@@ -564,14 +597,14 @@ namespace PhotoImporter.App
         }
 
         private void SelectSource_Click(object sender, RoutedEventArgs e) =>
-            SourceFolder = SelectFolder(SourceFolder, "コピー元フォルダーを選択してください") ?? SourceFolder;
+            SourceFolder = SelectFolder(SourceFolder, AppLocalization.Text("コピー元フォルダーを選択してください", "Select the source folder")) ?? SourceFolder;
 
         private void SelectDestination_Click(object sender, RoutedEventArgs e) =>
-            DestinationFolder = SelectFolder(DestinationFolder, "コピー先フォルダーを選択してください") ?? DestinationFolder;
+            DestinationFolder = SelectFolder(DestinationFolder, AppLocalization.Text("コピー先フォルダーを選択してください", "Select the destination folder")) ?? DestinationFolder;
 
         private void SelectExifCacheRoot_Click(object sender, RoutedEventArgs e)
         {
-            var selected = SelectFolder(ExifCacheRoot, "Exif キャッシュの保存先を選択してください");
+            var selected = SelectFolder(ExifCacheRoot, AppLocalization.Text("Exif キャッシュの保存先を選択してください", "Select the Exif cache location"));
             if (selected != null) ChangeExifCacheRoot(Path.GetFullPath(selected), false);
         }
 
@@ -623,17 +656,17 @@ namespace PhotoImporter.App
             if (!ShowImagePreview) return;
             if (item == null)
             {
-                SetImagePreviewState(null, "一覧から画像を選択してください。");
+                SetImagePreviewState(null, AppLocalization.Text("一覧から画像を選択してください。", "Select an image from the list."));
                 return;
             }
             if (item.IsScanError)
             {
-                SetImagePreviewState(null, "スキャンエラーの項目はプレビューできません。");
+                SetImagePreviewState(null, AppLocalization.Text("スキャンエラーの項目はプレビューできません。", "Items with scan errors cannot be previewed."));
                 return;
             }
             if (string.IsNullOrWhiteSpace(SourceFolder))
             {
-                SetImagePreviewState(null, "コピー元フォルダーを指定してください。");
+                SetImagePreviewState(null, AppLocalization.Text("コピー元フォルダーを指定してください。", "Specify the source folder."));
                 return;
             }
 
@@ -643,20 +676,20 @@ namespace PhotoImporter.App
                 var sourceRoot = Path.GetFullPath(SourceFolder);
                 previewPath = Path.GetFullPath(Path.Combine(sourceRoot, item.ImagePreviewSourcePath));
                 if (!IsSameOrUnder(previewPath, sourceRoot))
-                    throw new InvalidOperationException("コピー元フォルダー外の画像はプレビューできません。");
+                    throw new InvalidOperationException(AppLocalization.Text("コピー元フォルダー外の画像はプレビューできません。", "Images outside the source folder cannot be previewed."));
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
                                        ex is ArgumentException || ex is NotSupportedException ||
                                        ex is InvalidOperationException)
             {
-                SetImagePreviewState(null, "プレビュー元を確認できません: " + ex.Message);
+                SetImagePreviewState(null, AppLocalization.Text("プレビュー元を確認できません: ", "Unable to access the preview source: ") + ex.Message);
                 return;
             }
 
             var requestVersion = _imagePreviewRequestVersion;
             var cancellation = new CancellationTokenSource();
             _imagePreviewCancellation = cancellation;
-            SetImagePreviewState(null, "読込中...");
+            SetImagePreviewState(null, AppLocalization.Text("読込中...", "Loading..."));
             _ = LoadImagePreviewAsync(
                 item,
                 previewPath,
@@ -699,7 +732,7 @@ namespace PhotoImporter.App
             catch (Exception ex)
             {
                 if (IsCurrentImagePreviewRequest(item, requestVersion))
-                    SetImagePreviewState(null, "画像プレビューを読み込めません: " + ex.Message);
+                    SetImagePreviewState(null, AppLocalization.Text("画像プレビューを読み込めません: ", "Unable to load the image preview: ") + ex.Message);
             }
             finally
             {
@@ -729,7 +762,7 @@ namespace PhotoImporter.App
             SetImagePreviewState(
                 null,
                 ShowImagePreview
-                    ? "コピー元が変更されました。再スキャンして画像を選択してください。"
+                    ? AppLocalization.Text("コピー元が変更されました。再スキャンして画像を選択してください。", "The source changed. Scan again and select an image.")
                     : string.Empty);
         }
 
@@ -757,8 +790,8 @@ namespace PhotoImporter.App
             SelectedPreviewItem = null;
             Items.Clear();
             _previewIsCurrent = false;
-            Summary = "スキャン中...";
-            SetMessage("ファイルを調べています...", Brushes.DimGray);
+            Summary = AppLocalization.Text("スキャン中...", "Scanning...");
+            SetMessage(AppLocalization.Text("ファイルを調べています...", "Inspecting files..."), Brushes.DimGray);
 
             try
             {
@@ -798,8 +831,8 @@ namespace PhotoImporter.App
                     _exifCacheHits = 0;
                     ProgressPercent = 0;
                     IsProgressIndeterminate = true;
-                    ProgressText = "対象ファイルを検索しています...";
-                    SetMessage("Exif情報を読み取っています...", Brushes.DimGray);
+                    ProgressText = AppLocalization.Text("対象ファイルを検索しています...", "Searching for files...");
+                    SetMessage(AppLocalization.Text("Exif情報を読み取っています...", "Reading Exif data..."), Brushes.DimGray);
                     exifProgress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 }
                 var cancellationToken = scanCancellation == null
@@ -832,17 +865,19 @@ namespace PhotoImporter.App
                 if (preview.Warnings.Count > 0)
                     SetMessage(string.Join(" ", preview.Warnings), Brushes.DarkGoldenrod);
                 else
-                    SetMessage(preview.Items.Count == 0 ? "コピー元にファイルがありません。" :
-                        _exifCacheHits > 0 ? string.Format("プレビューを更新しました（Exif キャッシュ {0} 件）。", _exifCacheHits) :
-                        "プレビューを更新しました。", Brushes.DimGray);
+                    SetMessage(preview.Items.Count == 0
+                        ? AppLocalization.Text("コピー元にファイルがありません。", "No files were found in the source folder.")
+                        : _exifCacheHits > 0
+                            ? AppLocalization.Format("プレビューを更新しました（Exif キャッシュ {0} 件）。", "Preview updated ({0} Exif cache hits).", _exifCacheHits)
+                            : AppLocalization.Text("プレビューを更新しました。", "Preview updated."), Brushes.DimGray);
                 return true;
             }
             catch (OperationCanceledException) when (scanCancellation != null && scanCancellation.IsCancellationRequested)
             {
-                SetMessage("Exifスキャンを停止しました。解析済みのExifデータはキャッシュへ保存しました。", Brushes.DimGray);
+                SetMessage(AppLocalization.Text("Exifスキャンを停止しました。解析済みのExifデータはキャッシュへ保存しました。", "Exif scanning stopped. Exif data already analyzed was saved to the cache."), Brushes.DimGray);
             }
             catch (TemplateException ex) { ShowTemplateError(ex.Error); }
-            catch (UnauthorizedAccessException) { SetMessage("アクセスできないフォルダーがあります。権限を確認してください。", Brushes.Firebrick); }
+            catch (UnauthorizedAccessException) { SetMessage(AppLocalization.Text("アクセスできないフォルダーがあります。権限を確認してください。", "A folder could not be accessed. Check its permissions."), Brushes.Firebrick); }
             catch (Exception ex) { SetMessage(ex.Message, Brushes.Firebrick); }
             finally
             {
@@ -850,7 +885,7 @@ namespace PhotoImporter.App
                 if (ReferenceEquals(_scanCancellation, scanCancellation)) _scanCancellation = null;
                 scanCancellation?.Dispose();
                 SetBusy(false, false);
-                if (Summary == "スキャン中...") Summary = "0 件";
+                if (Summary == AppLocalization.Text("スキャン中...", "Scanning...")) Summary = AppLocalization.Text("0 件", "0 items");
             }
             return false;
         }
@@ -881,7 +916,7 @@ namespace PhotoImporter.App
             _copyPauseState = CopyPauseState.Running;
             _isCancellingCopy = false;
             SetBusy(true, true);
-            SetMessage("コピーしています...", Brushes.DimGray);
+            SetMessage(AppLocalization.Text("コピーしています...", "Copying..."), Brushes.DimGray);
             IsProgressIndeterminate = false;
             ProgressPercent = 0;
             var progressStatistics = new CopyProgressStatistics();
@@ -920,8 +955,9 @@ namespace PhotoImporter.App
             if (result.Aborted)
             {
                 SetMessage(
-                    string.Format(
+                    AppLocalization.Format(
                         "{0}（中止までに成功 {1} 件）",
+                        "{0} ({1} succeeded before the operation stopped)",
                         result.BatchError,
                         result.Items.Count(item => item.Status == CopyItemStatus.Copied)),
                     Brushes.Firebrick);
@@ -936,7 +972,7 @@ namespace PhotoImporter.App
                     item => MakeRelative(Path.GetFullPath(SourceFolder), item.Item.SourcePath),
                     item => item.RecoveryPath == null
                         ? item.Error
-                        : item.Error + " 保全した一時ファイル: " + item.RecoveryPath,
+                        : item.Error + AppLocalization.Text(" 保全した一時ファイル: ", " Preserved temporary file: ") + item.RecoveryPath,
                     StringComparer.OrdinalIgnoreCase);
 
             var rescanned = await ScanAsync();
@@ -945,8 +981,12 @@ namespace PhotoImporter.App
                 var rescanError = Message;
                 SetMessage(
                     FormatCopyCompletion(copied, failed, result.Cancelled) +
-                    " コピー後の一覧を更新できませんでした。手動でスキャンしてください。" +
-                    (string.IsNullOrWhiteSpace(rescanError) ? string.Empty : " 詳細: " + rescanError),
+                    AppLocalization.Text(
+                        " コピー後の一覧を更新できませんでした。手動でスキャンしてください。",
+                        " The list could not be refreshed after copying. Scan again manually.") +
+                    (string.IsNullOrWhiteSpace(rescanError)
+                        ? string.Empty
+                        : AppLocalization.Text(" 詳細: ", " Details: ") + rescanError),
                     Brushes.Firebrick);
                 return;
             }
@@ -972,25 +1012,29 @@ namespace PhotoImporter.App
             if (postProcessingError == null)
             {
                 SetMessage(
-                    FormatCopyCompletion(copied, failed, result.Cancelled) + " 再スキャンしました。",
+                    FormatCopyCompletion(copied, failed, result.Cancelled) +
+                    AppLocalization.Text(" 再スキャンしました。", " The list was rescanned."),
                     failed > 0 ? Brushes.Firebrick : Brushes.DimGray);
             }
             else
             {
                 SetMessage(
                     FormatCopyCompletion(copied, failed, result.Cancelled) +
-                    " コピー後の一覧表示を更新できませんでした。手動でスキャンしてください。詳細: " +
+                    AppLocalization.Text(
+                        " コピー後の一覧表示を更新できませんでした。手動でスキャンしてください。詳細: ",
+                        " The list display could not be refreshed after copying. Scan again manually. Details: ") +
                     postProcessingError,
                     Brushes.Firebrick);
             }
         }
 
         private static string FormatCopyCompletion(int copied, int failed, bool cancelled) =>
-            string.Format(
+            AppLocalization.Format(
                 "コピー完了: 成功 {0} / エラー {1}{2}。",
+                "Copy complete: {0} succeeded / {1} errors{2}.",
                 copied,
                 failed,
-                cancelled ? " / キャンセル" : string.Empty);
+                cancelled ? AppLocalization.Text(" / キャンセル", " / cancelled") : string.Empty);
 
         private async void MainWindow_ContentRendered(object sender, EventArgs e)
         {
@@ -1006,26 +1050,31 @@ namespace PhotoImporter.App
                     MessageBox.Show(
                         this,
                         BuildPartialRecoveryMessage(result),
-                        "残存する一時ファイル",
+                        AppLocalization.Text("残存する一時ファイル", "Remaining temporary files"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Warning);
                     SetMessage(
-                        string.Format(
+                        AppLocalization.Format(
                             "コピー先に残存する一時ファイルを {0} 件検出しました。自動削除せず保全しています。",
+                            "Found {0} remaining temporary files in the destination. They were preserved and not deleted automatically.",
                             result.Candidates.Count),
                         Brushes.DarkGoldenrod);
                 }
                 else if (result.Warnings.Count > 0)
                 {
                     SetMessage(
-                        "残存する一時ファイルを完全には検査できませんでした。コピー先の状態と権限を確認してください。",
+                        AppLocalization.Text(
+                            "残存する一時ファイルを完全には検査できませんでした。コピー先の状態と権限を確認してください。",
+                            "The remaining temporary files could not be inspected completely. Check the destination and its permissions."),
                         Brushes.DarkGoldenrod);
                 }
             }
             catch (Exception ex)
             {
                 SetMessage(
-                    "残存する一時ファイルを検査できませんでした: " + ex.Message,
+                    AppLocalization.Text(
+                        "残存する一時ファイルを検査できませんでした: ",
+                        "Unable to inspect remaining temporary files: ") + ex.Message,
                     Brushes.DarkGoldenrod);
             }
         }
@@ -1035,28 +1084,36 @@ namespace PhotoImporter.App
             if (result == null) throw new ArgumentNullException(nameof(result));
             var message = new StringBuilder()
                 .AppendFormat(
-                    "コピー先に Photo Importer の命名規則に一致する一時ファイルが {0} 件残っています。",
+                    AppLocalization.Text(
+                        "コピー先に Photo Importer の命名規則に一致する一時ファイルが {0} 件残っています。",
+                        "There are {0} temporary files in the destination that match the Photo Importer naming convention."),
                     result.Candidates.Count)
                 .AppendLine()
-                .AppendLine("コピーの成否や対応する正式ファイルは一時名だけでは判断できないため、自動削除・自動昇格はしていません。")
+                .AppendLine(AppLocalization.Text(
+                    "コピーの成否や対応する正式ファイルは一時名だけでは判断できないため、自動削除・自動昇格はしていません。",
+                    "The temporary names alone cannot determine whether copying succeeded or which final file they belong to, so the files were not deleted or promoted automatically."))
                 .AppendLine()
-                .AppendLine("検出したファイル:");
+                .AppendLine(AppLocalization.Text("検出したファイル:", "Detected files:"));
 
             const int maximumDisplayedPaths = 12;
             foreach (var candidate in result.Candidates.Take(maximumDisplayedPaths))
                 message.AppendLine(candidate.Path);
             if (result.Candidates.Count > maximumDisplayedPaths)
-                message.AppendFormat("ほか {0} 件", result.Candidates.Count - maximumDisplayedPaths).AppendLine();
+                message.AppendFormat(
+                    AppLocalization.Text("ほか {0} 件", "{0} more"),
+                    result.Candidates.Count - maximumDisplayedPaths).AppendLine();
 
             message
                 .AppendLine()
-                .AppendLine("状態を確認して、次のように対応してください:")
-                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.Missing))
-                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.MatchesExpectedSource))
-                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.MatchesPreviousSnapshot))
-                .AppendLine("・" + PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.RequiresComparison))
+                .AppendLine(AppLocalization.Text("状態を確認して、次のように対応してください:", "Check the state and take the following action:"))
+                .AppendLine("• " + AppLocalization.UserMessage(PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.Missing)))
+                .AppendLine("• " + AppLocalization.UserMessage(PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.MatchesExpectedSource)))
+                .AppendLine("• " + AppLocalization.UserMessage(PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.MatchesPreviousSnapshot)))
+                .AppendLine("• " + AppLocalization.UserMessage(PartialRecoveryGuidance.Describe(PartialRecoveryDestinationState.RequiresComparison)))
                 .AppendLine()
-                .Append("元写真が利用できる場合は、元写真を正として手動で再スキャンしてください。");
+                .Append(AppLocalization.Text(
+                    "元写真が利用できる場合は、元写真を正として手動で再スキャンしてください。",
+                    "If the original photos are available, treat them as authoritative and scan again manually."));
 
             return message.ToString();
         }
@@ -1073,8 +1130,8 @@ namespace PhotoImporter.App
             _scanCancellation?.Cancel();
             _copyCancellation?.Cancel();
             SetMessage(_isScanningExif
-                ? "Exifスキャンを停止しています。現在のファイルを完了してキャッシュを保存します..."
-                : "キャンセルしています...", Brushes.DimGray);
+                ? AppLocalization.Text("Exifスキャンを停止しています。現在のファイルを完了してキャッシュを保存します...", "Stopping Exif scanning. Finishing the current file and saving the cache...")
+                : AppLocalization.Text("キャンセルしています...", "Cancelling..."), Brushes.DimGray);
         }
 
         private void ToggleCopyPause()
@@ -1107,18 +1164,18 @@ namespace PhotoImporter.App
             switch (_copyPauseState)
             {
                 case CopyPauseState.PausePending:
-                    SetMessage("現在のファイル完了後に一時停止します...", Brushes.DimGray);
+                    SetMessage(AppLocalization.Text("現在のファイル完了後に一時停止します...", "Pausing after the current file completes..."), Brushes.DimGray);
                     break;
                 case CopyPauseState.NativePauseRequested:
-                    SetMessage("3秒経過したため、現在のファイルを一時停止しています...", Brushes.DimGray);
+                    SetMessage(AppLocalization.Text("3秒経過したため、現在のファイルを一時停止しています...", "Three seconds elapsed; pausing the current file..."), Brushes.DimGray);
                     break;
                 case CopyPauseState.PausedBetweenFiles:
                 case CopyPauseState.PausedWithinFile:
-                    SetMessage("コピーを一時停止しました。", Brushes.DimGray);
+                    SetMessage(AppLocalization.Text("コピーを一時停止しました。", "Copying paused."), Brushes.DimGray);
                     break;
                 case CopyPauseState.Running:
                     if (previousState != CopyPauseState.Running)
-                        SetMessage("コピーを再開しました...", Brushes.DimGray);
+                        SetMessage(AppLocalization.Text("コピーを再開しました...", "Copying resumed..."), Brushes.DimGray);
                     break;
             }
         }
@@ -1146,12 +1203,13 @@ namespace PhotoImporter.App
             long totalBytes)
         {
             _copyProgressStatistics = statistics;
-            CopyProgressSummaryText = string.Format(
+            CopyProgressSummaryText = AppLocalization.Format(
                 "処理済み 0 / {0} 件    容量 0 B / {1}",
+                "Processed 0 / {0} items    Size 0 B / {1}",
                 totalFiles,
                 FormatBytes(totalBytes));
-            CopyProgressRatesText = "全体平均 計算中...    直近1分 計算中...";
-            CopyProgressTimeText = "経過 00:00:00    残り 計算中...";
+            CopyProgressRatesText = AppLocalization.Text("全体平均 計算中...    直近1分 計算中...", "Overall average calculating...    Last minute calculating...");
+            CopyProgressTimeText = AppLocalization.Text("経過 00:00:00    残り 計算中...", "Elapsed 00:00:00    Remaining calculating...");
             CopyProgressPercentText = "0%";
 
             var timer = new DispatcherTimer(DispatcherPriority.Background)
@@ -1192,15 +1250,17 @@ namespace PhotoImporter.App
                 ? 100
                 : Math.Min(100, progress.CompletedWorkBytes * 100.0 / progress.TotalBytes);
             CopyProgressPercentText = ProgressPercent.ToString("0") + "%";
-            CopyProgressSummaryText = string.Format(
+            CopyProgressSummaryText = AppLocalization.Format(
                 "処理済み {0} / {1} 件    容量 {2} / {3}",
+                "Processed {0} / {1} items    Size {2} / {3}",
                 progress.CompletedFiles,
                 progress.TotalFiles,
                 FormatBytes(progress.CompletedWorkBytes),
                 FormatBytes(progress.TotalBytes));
 
-            CopyProgressRatesText = string.Format(
+            CopyProgressRatesText = AppLocalization.Format(
                 "全体平均 {0}    直近1分 {1}",
+                "Overall average {0}    Last minute {1}",
                 FormatCopyRates(
                     snapshot.OverallFilesPerSecond,
                     snapshot.OverallBytesPerSecond),
@@ -1210,15 +1270,16 @@ namespace PhotoImporter.App
 
             string remaining;
             if (!snapshot.EstimatedRemaining.HasValue)
-                remaining = "計算中...";
+                remaining = AppLocalization.Text("計算中...", "Calculating...");
             else if (snapshot.EstimatedRemaining.Value == TimeSpan.Zero)
                 remaining = "00:00:00";
             else
-                remaining = "約 " + FormatDuration(snapshot.EstimatedRemaining.Value);
-            if (snapshot.IsPaused) remaining += "（一時停止中）";
+                remaining = AppLocalization.Text("約 ", "About ") + FormatDuration(snapshot.EstimatedRemaining.Value);
+            if (snapshot.IsPaused) remaining += AppLocalization.Text("（一時停止中）", " (paused)");
 
-            CopyProgressTimeText = string.Format(
+            CopyProgressTimeText = AppLocalization.Format(
                 "経過 {0}    残り {1}",
+                "Elapsed {0}    Remaining {1}",
                 FormatDuration(snapshot.ActiveElapsed),
                 remaining);
         }
@@ -1228,10 +1289,11 @@ namespace PhotoImporter.App
             double? bytesPerSecond)
         {
             if (!filesPerSecond.HasValue || !bytesPerSecond.HasValue)
-                return "計算中...";
+                return AppLocalization.Text("計算中...", "Calculating...");
 
-            return string.Format(
+            return AppLocalization.Format(
                 "{0} 件/秒・{1} MB/秒",
+                "{0} items/s · {1} MB/s",
                 FormatRateValue(filesPerSecond.Value),
                 FormatRateValue(bytesPerSecond.Value / (1024d * 1024)));
         }
@@ -1256,8 +1318,9 @@ namespace PhotoImporter.App
             {
                 case PhotoMetadataScanPhase.Preparing:
                     IsProgressIndeterminate = true;
-                    ProgressText = string.Format(
+                    ProgressText = AppLocalization.Format(
                         "Exifスキャンを準備しています（解析対象 {0} 件）...",
+                        "Preparing Exif scan ({0} items to analyze)...",
                         progress.TotalFiles);
                     break;
                 case PhotoMetadataScanPhase.Reading:
@@ -1265,8 +1328,9 @@ namespace PhotoImporter.App
                     ProgressPercent = progress.TotalFiles == 0
                         ? 100
                         : Math.Min(100, progress.CompletedFiles * 100.0 / progress.TotalFiles);
-                    ProgressText = string.Format(
+                    ProgressText = AppLocalization.Format(
                         "Exif {0}/{1} 件（{2:0}%、キャッシュ {3} 件）",
+                        "Exif {0}/{1} ({2:0}%, {3} cache hits)",
                         progress.CompletedFiles,
                         progress.TotalFiles,
                         ProgressPercent,
@@ -1274,11 +1338,11 @@ namespace PhotoImporter.App
                     break;
                 case PhotoMetadataScanPhase.SavingCache:
                     IsProgressIndeterminate = true;
-                    ProgressText = "Exifキャッシュを保存しています...";
+                    ProgressText = AppLocalization.Text("Exifキャッシュを保存しています...", "Saving the Exif cache...");
                     break;
                 case PhotoMetadataScanPhase.Completed:
                     IsProgressIndeterminate = true;
-                    ProgressText = "Exif結果を一覧へ反映しています...";
+                    ProgressText = AppLocalization.Text("Exif結果を一覧へ反映しています...", "Applying Exif results to the list...");
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -1307,10 +1371,11 @@ namespace PhotoImporter.App
             var destinationVolume = new WindowsVolumeInfoReader().Read(destinationRoot);
             var destinationTimestampPolicy = destinationVolume.TimestampPolicy;
             if (!destinationTimestampPolicy.IsSupported)
-                throw new NotSupportedException(string.Format(
+                throw new NotSupportedException(AppLocalization.Format(
                     "コピー先のファイルシステム「{0}」には対応していません。NTFS、ReFS、exFAT、FAT、FAT32 のいずれかを使用してください。",
+                    "The destination file system \"{0}\" is not supported. Use NTFS, ReFS, exFAT, FAT, or FAT32.",
                     string.IsNullOrWhiteSpace(destinationVolume.FileSystemName)
-                        ? "不明"
+                        ? AppLocalization.Text("不明", "Unknown")
                         : destinationVolume.FileSystemName));
             var destinationLookup = new FileSystemDestinationLookup(destinationRoot);
             var allocator = new DestinationAllocator(
@@ -1351,7 +1416,9 @@ namespace PhotoImporter.App
                      IsSameOrUnder(exifCacheRoot, destinationRoot) || IsSameOrUnder(destinationRoot, exifCacheRoot)))
                 {
                     warnings.Add(string.Format(
-                        "Exif キャッシュの保存先 ({0}) がコピー元またはコピー先と重なるため、キャッシュなしで続行しました。",
+                        AppLocalization.Text(
+                            "Exif キャッシュの保存先 ({0}) がコピー元またはコピー先と重なるため、キャッシュなしで続行しました。",
+                            "The Exif cache location ({0}) overlaps the source or destination, so the scan continued without the cache."),
                         exifCacheRoot));
                 }
                 else if (useExifCache) cacheStore = new ExifCacheStore(exifCacheRoot);
@@ -1366,7 +1433,9 @@ namespace PhotoImporter.App
                     catch (Exception ex) when (ex is Win32Exception || ex is IOException ||
                                                    ex is UnauthorizedAccessException)
                     {
-                        warnings.Add("コピー元のボリューム情報を取得できないため、Exif キャッシュなしで続行しました: " + ex.Message);
+                        warnings.Add(AppLocalization.Text(
+                            "コピー元のボリューム情報を取得できないため、Exif キャッシュなしで続行しました: ",
+                            "The source volume information could not be read, so the scan continued without the Exif cache: ") + ex.Message);
                         cacheStore = null;
                     }
                 }
@@ -1424,7 +1493,9 @@ namespace PhotoImporter.App
                         {
                             previewByPath[path] = PreviewItem.ForScanError(
                                 sourcePath,
-                                "関連先画像のコピー先を決定できません。");
+                                AppLocalization.Text(
+                                    "関連先画像のコピー先を決定できません。",
+                                    "The destination for the associated image could not be determined."));
                             continue;
                         }
                         var sidecarRelativePath = SidecarDestinationPath.Derive(
@@ -1564,7 +1635,9 @@ namespace PhotoImporter.App
                 if (parent.DestinationStatus == DestinationStatus.Conflict)
                 {
                     foreach (var child in children.Where(child => child.CanCopy))
-                        child.BlockByRelatedConflict("関連先画像が競合しています。");
+                        child.BlockByRelatedConflict(AppLocalization.Text(
+                            "関連先画像が競合しています。",
+                            "The associated image has a conflict."));
                     continue;
                 }
 
@@ -1572,9 +1645,13 @@ namespace PhotoImporter.App
                     children.Any(child => child.IsScanError ||
                                           child.DestinationStatus == DestinationStatus.Conflict))
                 {
-                    parent.BlockByRelatedConflict("関連サイドカーが競合または読取エラーです。");
+                    parent.BlockByRelatedConflict(AppLocalization.Text(
+                        "関連サイドカーが競合または読取エラーです。",
+                        "An associated sidecar has a conflict or read error."));
                     foreach (var child in children.Where(child => child.CanCopy))
-                        child.BlockByRelatedConflict("関連先画像と同時にコピーできません。");
+                        child.BlockByRelatedConflict(AppLocalization.Text(
+                            "関連先画像と同時にコピーできません。",
+                            "This file cannot be copied together with the associated image."));
                 }
             }
         }
@@ -1698,7 +1775,7 @@ namespace PhotoImporter.App
             _appliedFilter = null;
             CommitAppliedFilterEditorState(0);
             ApplyPreviewFilter(null);
-            SetMessage("一覧フィルターをクリアしました。", Brushes.DimGray);
+            SetMessage(AppLocalization.Text("一覧フィルターをクリアしました。", "List filter cleared."), Brushes.DimGray);
         }
 
         private void FilterCondition_PropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -1718,13 +1795,13 @@ namespace PhotoImporter.App
                     ? (Predicate<PreviewItem>)null
                     : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
                 SetMessage(conditionCount == 0
-                    ? "条件なしで全項目を表示しました。"
-                    : string.Format("一覧フィルターを適用しました（{0} 条件）。", conditionCount), Brushes.DimGray);
+                    ? AppLocalization.Text("条件なしで全項目を表示しました。", "All items are shown with no conditions.")
+                    : AppLocalization.Format("一覧フィルターを適用しました（{0} 条件）。", "List filter applied ({0} conditions).", conditionCount), Brushes.DimGray);
                 return true;
             }
             catch (FilterEvaluationException ex)
             {
-                SetMessage("フィルター評価エラー: " + ex.Message, Brushes.Firebrick);
+                SetMessage(AppLocalization.Text("フィルター評価エラー: ", "Filter evaluation error: ") + ex.Message, Brushes.Firebrick);
                 return false;
             }
         }
@@ -1751,8 +1828,8 @@ namespace PhotoImporter.App
                 _exifCacheHits = 0;
                 ProgressPercent = 0;
                 IsProgressIndeterminate = true;
-                ProgressText = "Exifスキャン準備中...";
-                SetMessage("フィルターに必要なExif情報を読み取っています。現在の一覧は完了まで維持されます...", Brushes.DimGray);
+                ProgressText = AppLocalization.Text("Exifスキャン準備中...", "Preparing Exif scan...");
+                SetMessage(AppLocalization.Text("フィルターに必要なExif情報を読み取っています。現在の一覧は完了まで維持されます...", "Reading Exif data required by the filter. The current list remains visible until completion..."), Brushes.DimGray);
                 var progress = new Progress<PhotoMetadataScanProgress>(UpdateExifScanProgress);
                 var token = scanCancellation.Token;
                 var loadPlan = LazyExifPreviewLoadPlan.Capture(
@@ -1775,22 +1852,22 @@ namespace PhotoImporter.App
                     ? (Predicate<PreviewItem>)null
                     : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
                 SetMessage(loadResult.Warnings.Count == 0
-                    ? string.Format("Exif情報を読み込み、一覧フィルターを適用しました（{0} 条件）。", conditionCount)
+                    ? AppLocalization.Format("Exif情報を読み込み、一覧フィルターを適用しました（{0} 条件）。", "Exif data loaded and list filter applied ({0} conditions).", conditionCount)
                     : string.Join(" ", loadResult.Warnings),
                     loadResult.Warnings.Count == 0 ? Brushes.DimGray : Brushes.DarkGoldenrod);
                 return true;
             }
             catch (OperationCanceledException) when (scanCancellation != null && scanCancellation.IsCancellationRequested)
             {
-                SetMessage("Exifスキャンを停止しました。直前の一覧とフィルターを維持しています。", Brushes.DimGray);
+                SetMessage(AppLocalization.Text("Exifスキャンを停止しました。直前の一覧とフィルターを維持しています。", "Exif scanning stopped. The previous list and filter are unchanged."), Brushes.DimGray);
             }
             catch (FilterEvaluationException ex)
             {
-                SetMessage("フィルター評価エラー: " + ex.Message + " 直前の一覧を維持しています。", Brushes.Firebrick);
+                SetMessage(AppLocalization.Text("フィルター評価エラー: ", "Filter evaluation error: ") + ex.Message + AppLocalization.Text(" 直前の一覧を維持しています。", " The previous list is unchanged."), Brushes.Firebrick);
             }
             catch (Exception ex)
             {
-                SetMessage(ex.Message + " 直前の一覧とフィルターを維持しています。", Brushes.Firebrick);
+                SetMessage(ex.Message + AppLocalization.Text(" 直前の一覧とフィルターを維持しています。", " The previous list and filter are unchanged."), Brushes.Firebrick);
             }
             finally
             {
@@ -1836,8 +1913,9 @@ namespace PhotoImporter.App
         private void UpdateSummary()
         {
             var rows = Items.Where(item => !item.IsScanError).ToList();
-            Summary = string.Format(
+            Summary = AppLocalization.Format(
                 "{0} 件（対象 {1} / 未取込 {2} / 上書き {3} / 取込済 {4} / 競合・エラー {5}）",
+                "{0} items (selected {1} / not imported {2} / overwrite {3} / imported {4} / conflicts or errors {5})",
                 rows.Count,
                 rows.Count(item => item.IsSelected && item.CanCopy),
                 rows.Count(item => item.DestinationStatus == DestinationStatus.NotImported),
@@ -2017,7 +2095,7 @@ namespace PhotoImporter.App
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                SetMessage("プリセットは適用しましたが、最終利用日時を保存できませんでした。 " + ex.Message,
+                SetMessage(AppLocalization.Text("プリセットは適用しましたが、最終利用日時を保存できませんでした。 ", "The preset was applied, but its last-used time could not be saved. ") + ex.Message,
                     Brushes.DarkGoldenrod);
             }
         }
@@ -2041,12 +2119,12 @@ namespace PhotoImporter.App
                 ReplacePresets(refreshed, updated.Id, false);
                 _presetUndo = null;
                 NotifyPresetStateChanged();
-                SetMessage("プリセット「" + updated.Name + "」を保存しました。", Brushes.DimGray);
+                SetMessage(AppLocalization.IsEnglish ? "Saved preset \"" + updated.Name + "\"." : "プリセット「" + updated.Name + "」を保存しました。", Brushes.DimGray);
                 return true;
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセットを保存できませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセットを保存できませんでした。", "Unable to save the preset."), ex);
                 ReloadPresets(SelectedPreset?.Id, false);
                 return false;
             }
@@ -2055,7 +2133,7 @@ namespace PhotoImporter.App
         private bool SaveCurrentPresetAs()
         {
             if (_isBusy) return false;
-            var input = PresetDialogs.PromptForName(this, "名前を付けて保存", string.Empty, false, true);
+            var input = PresetDialogs.PromptForName(this, AppLocalization.Text("名前を付けて保存", "Save preset as"), string.Empty, false, true);
             if (input == null) return false;
             string name;
             try
@@ -2064,7 +2142,7 @@ namespace PhotoImporter.App
             }
             catch (ArgumentException ex)
             {
-                ShowPresetError("プリセット名が正しくありません。", ex);
+                ShowPresetError(AppLocalization.Text("プリセット名が正しくありません。", "The preset name is invalid."), ex);
                 return false;
             }
 
@@ -2075,8 +2153,10 @@ namespace PhotoImporter.App
             {
                 var confirmation = MessageBox.Show(
                     this,
-                    "同じ名前のプリセットがあります。\n「" + existing.Name + "」を上書きしますか？",
-                    "プリセットを上書き",
+                    AppLocalization.IsEnglish
+                        ? "A preset with the same name exists.\nOverwrite \"" + existing.Name + "\"?"
+                        : "同じ名前のプリセットがあります。\n「" + existing.Name + "」を上書きしますか？",
+                    AppLocalization.Text("プリセットを上書き", "Overwrite preset"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning);
                 if (confirmation != MessageBoxResult.Yes) return false;
@@ -2100,12 +2180,12 @@ namespace PhotoImporter.App
                 ReplacePresets(refreshed, preset.Id, false);
                 _presetUndo = null;
                 NotifyPresetStateChanged();
-                SetMessage("プリセット「" + preset.Name + "」を保存しました。", Brushes.DimGray);
+                SetMessage(AppLocalization.IsEnglish ? "Saved preset \"" + preset.Name + "\"." : "プリセット「" + preset.Name + "」を保存しました。", Brushes.DimGray);
                 return true;
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセットを保存できませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセットを保存できませんでした。", "Unable to save the preset."), ex);
                 ReloadPresets(SelectedPreset?.Id, false);
                 return false;
             }
@@ -2116,7 +2196,7 @@ namespace PhotoImporter.App
             var selected = SelectedManagedPreset;
             if (selected == null) return;
             var input = PresetDialogs.PromptForName(
-                this, "プリセット名を変更", selected.Name, selected.SaveSourceFolder, false);
+                this, AppLocalization.Text("プリセット名を変更", "Rename preset"), selected.Name, selected.SaveSourceFolder, false);
             if (input == null) return;
             try
             {
@@ -2126,11 +2206,11 @@ namespace PhotoImporter.App
                 var refreshed = _presetStore.Update(renamed);
                 ReplacePresets(refreshed, SelectedPreset?.Id, false);
                 RefreshManagedPresets(renamed.Id);
-                SetMessage("プリセット名を「" + renamed.Name + "」へ変更しました。", Brushes.DimGray);
+                SetMessage(AppLocalization.IsEnglish ? "Renamed the preset to \"" + renamed.Name + "\"." : "プリセット名を「" + renamed.Name + "」へ変更しました。", Brushes.DimGray);
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセット名を変更できませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセット名を変更できませんでした。", "Unable to rename the preset."), ex);
                 ReloadPresets(SelectedPreset?.Id, false);
                 RefreshManagedPresets(selected.Id);
             }
@@ -2141,7 +2221,7 @@ namespace PhotoImporter.App
             var selected = SelectedManagedPreset;
             if (selected == null) return;
             var input = PresetDialogs.PromptForName(
-                this, "プリセットを複製", selected.Name + " - コピー", selected.SaveSourceFolder, false);
+                this, AppLocalization.Text("プリセットを複製", "Duplicate preset"), selected.Name + AppLocalization.Text(" - コピー", " - Copy"), selected.SaveSourceFolder, false);
             if (input == null) return;
             try
             {
@@ -2155,11 +2235,11 @@ namespace PhotoImporter.App
                 var refreshed = _presetStore.Add(duplicate);
                 ReplacePresets(refreshed, SelectedPreset?.Id, false);
                 RefreshManagedPresets(duplicate.Id);
-                SetMessage("プリセット「" + duplicate.Name + "」を作成しました。", Brushes.DimGray);
+                SetMessage(AppLocalization.IsEnglish ? "Created preset \"" + duplicate.Name + "\"." : "プリセット「" + duplicate.Name + "」を作成しました。", Brushes.DimGray);
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセットを複製できませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセットを複製できませんでした。", "Unable to duplicate the preset."), ex);
                 ReloadPresets(SelectedPreset?.Id, false);
                 RefreshManagedPresets(selected.Id);
             }
@@ -2171,9 +2251,10 @@ namespace PhotoImporter.App
             if (selected == null) return;
             var confirmation = MessageBox.Show(
                 this,
-                "プリセット「" + selected.Name + "」を削除しますか？\n\n" +
-                "削除しても、コピー済みの写真と設定ファイルの現在値は変わりません。",
-                "プリセットを削除",
+                AppLocalization.IsEnglish
+                    ? "Delete preset \"" + selected.Name + "\"?\n\nDeleting it does not change copied photos or the current setting values."
+                    : "プリセット「" + selected.Name + "」を削除しますか？\n\n削除しても、コピー済みの写真と設定ファイルの現在値は変わりません。",
+                AppLocalization.Text("プリセットを削除", "Delete preset"),
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
             if (confirmation != MessageBoxResult.Yes) return;
@@ -2189,11 +2270,11 @@ namespace PhotoImporter.App
                     NotifyPresetStateChanged();
                 }
                 RefreshManagedPresets(null);
-                SetMessage("プリセット「" + selected.Name + "」を削除しました。", Brushes.DimGray);
+                SetMessage(AppLocalization.IsEnglish ? "Deleted preset \"" + selected.Name + "\"." : "プリセット「" + selected.Name + "」を削除しました。", Brushes.DimGray);
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセットを削除できませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセットを削除できませんでした。", "Unable to delete the preset."), ex);
                 ReloadPresets(SelectedPreset?.Id, false);
                 RefreshManagedPresets(null);
             }
@@ -2205,8 +2286,8 @@ namespace PhotoImporter.App
             if (selected == null) return;
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
-                Title = "プリセットをエクスポート",
-                Filter = "PhotoImporter プリセット (*.xml)|*.xml|すべてのファイル (*.*)|*.*",
+                Title = AppLocalization.Text("プリセットをエクスポート", "Export preset"),
+                Filter = AppLocalization.Text("PhotoImporter プリセット (*.xml)|*.xml|すべてのファイル (*.*)|*.*", "PhotoImporter preset (*.xml)|*.xml|All files (*.*)|*.*"),
                 DefaultExt = ".xml",
                 AddExtension = true,
                 OverwritePrompt = true,
@@ -2216,11 +2297,11 @@ namespace PhotoImporter.App
             try
             {
                 _presetStore.WriteExportFile(dialog.FileName, selected);
-                SetMessage("プリセットをエクスポートしました。 " + dialog.FileName, Brushes.DimGray);
+                SetMessage(AppLocalization.Text("プリセットをエクスポートしました。 ", "Preset exported. ") + dialog.FileName, Brushes.DimGray);
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセットをエクスポートできませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセットをエクスポートできませんでした。", "Unable to export the preset."), ex);
             }
         }
 
@@ -2228,8 +2309,8 @@ namespace PhotoImporter.App
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Title = "プリセットをインポート",
-                Filter = "PhotoImporter プリセット (*.xml)|*.xml|すべてのファイル (*.*)|*.*",
+                Title = AppLocalization.Text("プリセットをインポート", "Import preset"),
+                Filter = AppLocalization.Text("PhotoImporter プリセット (*.xml)|*.xml|すべてのファイル (*.*)|*.*", "PhotoImporter preset (*.xml)|*.xml|All files (*.*)|*.*"),
                 Multiselect = false
             };
             if (dialog.ShowDialog(this) != true) return;
@@ -2242,7 +2323,7 @@ namespace PhotoImporter.App
                     string.Equals(item.Name, imported.Name, StringComparison.OrdinalIgnoreCase));
                 if (idMatch != null && nameMatch != null && idMatch.Id != nameMatch.Id)
                     throw new InvalidOperationException(
-                        "インポートするプリセットの id と名前が、それぞれ別の既存プリセットと重複しています。");
+                        AppLocalization.Text("インポートするプリセットの id と名前が、それぞれ別の既存プリセットと重複しています。", "The imported preset ID and name conflict with two different existing presets."));
 
                 var conflict = idMatch ?? nameMatch;
                 IReadOnlyList<PhotoImporterPreset> refreshed;
@@ -2269,7 +2350,7 @@ namespace PhotoImporter.App
                     else
                     {
                         var nameInput = PresetDialogs.PromptForName(
-                            this, "別名でインポート", imported.Name + " - コピー", imported.SaveSourceFolder, false);
+                            this, AppLocalization.Text("別名でインポート", "Import with another name"), imported.Name + AppLocalization.Text(" - コピー", " - Copy"), imported.SaveSourceFolder, false);
                         if (nameInput == null) return;
                         var now = DateTime.UtcNow;
                         imported.Id = Guid.NewGuid();
@@ -2286,13 +2367,13 @@ namespace PhotoImporter.App
                 var warning = GetPresetValidationWarning(imported);
                 SetMessage(
                     string.IsNullOrEmpty(warning)
-                        ? "プリセット「" + imported.Name + "」をインポートしました。"
-                        : "プリセットをインポートしましたが、設定に警告があります。 " + warning,
+                        ? AppLocalization.IsEnglish ? "Imported preset \"" + imported.Name + "\"." : "プリセット「" + imported.Name + "」をインポートしました。"
+                        : AppLocalization.Text("プリセットをインポートしましたが、設定に警告があります。 ", "The preset was imported with setting warnings. ") + warning,
                     string.IsNullOrEmpty(warning) ? Brushes.DimGray : Brushes.DarkGoldenrod);
             }
             catch (Exception ex) when (IsPresetStoreFailure(ex))
             {
-                ShowPresetError("プリセットをインポートできませんでした。", ex);
+                ShowPresetError(AppLocalization.Text("プリセットをインポートできませんでした。", "Unable to import the preset."), ex);
                 ReloadPresets(SelectedPreset?.Id, false);
                 RefreshManagedPresets(null);
             }
@@ -2302,14 +2383,19 @@ namespace PhotoImporter.App
         {
             if (SelectedManagedPreset == null || _isBusy) return;
             TemplateText = SelectedManagedPreset.TemplateText;
-            SetMessage("プリセット「" + SelectedManagedPreset.Name + "」からテンプレートだけを取り込みました。",
+            SetMessage(AppLocalization.IsEnglish
+                    ? "Applied only the template from preset \"" + SelectedManagedPreset.Name + "\"."
+                    : "プリセット「" + SelectedManagedPreset.Name + "」からテンプレートだけを取り込みました。",
                 Brushes.DimGray);
         }
 
         private void RefreshManagedPresets(Guid? selectedId)
         {
             if (ManagedPresets == null) return;
-            var ordered = string.Equals(PresetManagerSortMode, "最終利用日順", StringComparison.Ordinal)
+            var ordered = string.Equals(
+                PresetManagerSortMode,
+                AppLocalization.Text("最終利用日順", "Last used"),
+                StringComparison.Ordinal)
                 ? Presets.OrderByDescending(item => item.LastUsedUtc.HasValue)
                     .ThenByDescending(item => item.LastUsedUtc)
                     .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -2337,24 +2423,24 @@ namespace PhotoImporter.App
             {
                 if (string.IsNullOrWhiteSpace(preset.DestinationFolder) ||
                     !Path.IsPathRooted(preset.DestinationFolder))
-                    warnings.Add("コピー先が絶対パスではありません。");
+                    warnings.Add(AppLocalization.Text("コピー先が絶対パスではありません。", "The destination is not an absolute path."));
                 else if (!Directory.Exists(preset.DestinationFolder))
-                    warnings.Add("コピー先が存在しません。");
+                    warnings.Add(AppLocalization.Text("コピー先が存在しません。", "The destination does not exist."));
                 if (preset.SaveSourceFolder)
                 {
                     if (string.IsNullOrWhiteSpace(preset.SourceFolder) || !Path.IsPathRooted(preset.SourceFolder))
-                        warnings.Add("コピー元が絶対パスではありません。");
+                        warnings.Add(AppLocalization.Text("コピー元が絶対パスではありません。", "The source is not an absolute path."));
                     else if (!Directory.Exists(preset.SourceFolder))
-                        warnings.Add("コピー元が存在しません。");
+                        warnings.Add(AppLocalization.Text("コピー元が存在しません。", "The source does not exist."));
                 }
             }
             catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException ||
                                        ex is PathTooLongException)
             {
-                warnings.Add("フォルダーパスが正しくありません。");
+                warnings.Add(AppLocalization.Text("フォルダーパスが正しくありません。", "A folder path is invalid."));
             }
             var parsed = TemplateParser.Parse(preset.TemplateText ?? string.Empty);
-            if (!parsed.IsValid) warnings.Add("テンプレートが正しくありません。");
+            if (!parsed.IsValid) warnings.Add(AppLocalization.Text("テンプレートが正しくありません。", "The template is invalid."));
             try
             {
                 SidecarPolicy.Create(preset.AssociateSidecars, preset.SidecarExtensions);
@@ -2379,20 +2465,23 @@ namespace PhotoImporter.App
             try
             {
                 if (string.IsNullOrWhiteSpace(DestinationFolder) || !Path.IsPathRooted(DestinationFolder))
-                    throw new ArgumentException("コピー先には絶対パスを指定してください。");
+                    throw new ArgumentException(AppLocalization.Text("コピー先には絶対パスを指定してください。", "Specify an absolute destination path."));
                 if (saveSourceFolder &&
                     (string.IsNullOrWhiteSpace(SourceFolder) || !Path.IsPathRooted(SourceFolder)))
-                    throw new ArgumentException("保存するコピー元には絶対パスを指定してください。");
+                    throw new ArgumentException(AppLocalization.Text("保存するコピー元には絶対パスを指定してください。", "Specify an absolute source path to save."));
                 var destination = NormalizePath(DestinationFolder);
                 var source = saveSourceFolder ? NormalizePath(SourceFolder) : null;
                 if (saveSourceFolder &&
                     (IsSameOrUnder(source, destination) || IsSameOrUnder(destination, source)))
                     throw new InvalidOperationException(
-                        "コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
+                        AppLocalization.Text("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。", "The source and destination must be different folders and neither may be inside the other."));
                 var parsed = TemplateParser.Parse(TemplateText);
                 if (!parsed.IsValid)
-                    throw new ArgumentException(string.Format(
-                        "テンプレートエラー: {0}（位置 {1}）", parsed.Error.Code, parsed.Error.Position + 1));
+                    throw new ArgumentException(AppLocalization.Format(
+                        "テンプレートエラー: {0}（位置 {1}）",
+                        "Template error: {0} (position {1})",
+                        parsed.Error.Code,
+                        parsed.Error.Position + 1));
                 var sidecarPolicy = CreateSidecarPolicy(AssociateSidecars, SidecarExtensionsText);
                 preset = new PhotoImporterPreset
                 {
@@ -2417,7 +2506,7 @@ namespace PhotoImporter.App
             catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException ||
                                        ex is NotSupportedException || ex is PathTooLongException)
             {
-                ShowPresetError("現在の設定をプリセットへ保存できません。", ex);
+                ShowPresetError(AppLocalization.Text("現在の設定をプリセットへ保存できません。", "Unable to save the current settings as a preset."), ex);
                 return false;
             }
         }
@@ -2456,9 +2545,9 @@ namespace PhotoImporter.App
             try
             {
                 if (string.IsNullOrWhiteSpace(SourceFolder) || !Path.IsPathRooted(SourceFolder))
-                    throw new ArgumentException("コピー元には絶対パスを指定してください。");
+                    throw new ArgumentException(AppLocalization.Text("コピー元には絶対パスを指定してください。", "Specify an absolute source path."));
                 if (string.IsNullOrWhiteSpace(DestinationFolder) || !Path.IsPathRooted(DestinationFolder))
-                    throw new ArgumentException("コピー先には絶対パスを指定してください。");
+                    throw new ArgumentException(AppLocalization.Text("コピー先には絶対パスを指定してください。", "Specify an absolute destination path."));
                 var source = Path.GetFullPath(SourceFolder ?? string.Empty);
                 var destination = Path.GetFullPath(DestinationFolder ?? string.Empty);
                 ValidateRoots(source, destination);
@@ -2469,13 +2558,13 @@ namespace PhotoImporter.App
                     return;
                 }
                 CreateSidecarPolicy(AssociateSidecars, SidecarExtensionsText);
-                SetMessage("プリセットを適用しました。再スキャンしてください。", Brushes.DimGray);
+                SetMessage(AppLocalization.Text("プリセットを適用しました。再スキャンしてください。", "Preset applied. Scan again."), Brushes.DimGray);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
                                        ex is ArgumentException || ex is InvalidOperationException ||
                                        ex is NotSupportedException)
             {
-                SetMessage("プリセットを適用しましたが、設定にエラーがあります。 " + ex.Message,
+                SetMessage(AppLocalization.Text("プリセットを適用しましたが、設定にエラーがあります。 ", "The preset was applied, but the settings contain an error. ") + ex.Message,
                     Brushes.Firebrick);
             }
         }
@@ -2540,8 +2629,9 @@ namespace PhotoImporter.App
 
         private void ShowPresetError(string title, Exception ex)
         {
-            SetMessage(title + " " + ex.Message, Brushes.Firebrick);
-            MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            var message = AppLocalization.UserMessage(ex.Message);
+            SetMessage(title + " " + message, Brushes.Firebrick);
+            MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private static bool IsPresetStoreFailure(Exception ex) =>
@@ -2572,7 +2662,7 @@ namespace PhotoImporter.App
                     OnPropertyChanged(nameof(ExifCacheRoot));
                     NotifyExifSettingsSummaryChanged();
                     SettingsChanged(false);
-                    SetMessage("Exif キャッシュの保存先を既定値へ戻しました。", Brushes.DimGray);
+                    SetMessage(AppLocalization.Text("Exif キャッシュの保存先を既定値へ戻しました。", "The Exif cache location was restored to the default."), Brushes.DimGray);
                 }
                 return;
             }
@@ -2584,19 +2674,21 @@ namespace PhotoImporter.App
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
                                        ex is ArgumentException || ex is NotSupportedException)
             {
-                SetMessage(string.Format(
-                    "Exif キャッシュの保存先を使用できません ({0}): {1}", normalizedNewRoot, ex.Message),
+                SetMessage(AppLocalization.Format(
+                    "Exif キャッシュの保存先を使用できません ({0}): {1}",
+                    "The Exif cache location cannot be used ({0}): {1}",
+                    normalizedNewRoot,
+                    ex.Message),
                     Brushes.Firebrick);
                 return;
             }
 
             var confirmation = MessageBox.Show(
                 this,
-                "Exif キャッシュの保存先を変更します。\n\n" +
-                "現在: " + oldRoot + "\n" +
-                "変更後: " + normalizedNewRoot + "\n\n" +
-                "以前の保存先にあるキャッシュは残り、通常のスキャンでは使われなくなります。",
-                "Exif キャッシュの保存先を変更",
+                AppLocalization.IsEnglish
+                    ? "Change the Exif cache location.\n\nCurrent: " + oldRoot + "\nNew: " + normalizedNewRoot + "\n\nCaches in the previous location will remain and will no longer be used during normal scans."
+                    : "Exif キャッシュの保存先を変更します。\n\n現在: " + oldRoot + "\n変更後: " + normalizedNewRoot + "\n\n以前の保存先にあるキャッシュは残り、通常のスキャンでは使われなくなります。",
+                AppLocalization.Text("Exif キャッシュの保存先を変更", "Change Exif cache location"),
                 MessageBoxButton.OKCancel,
                 MessageBoxImage.Information);
             if (confirmation != MessageBoxResult.OK) return;
@@ -2608,7 +2700,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(ExifCacheRoot));
             NotifyExifSettingsSummaryChanged();
             SettingsChanged(false);
-            SetMessage("Exif キャッシュの保存先を変更しました。", Brushes.DimGray);
+            SetMessage(AppLocalization.Text("Exif キャッシュの保存先を変更しました。", "The Exif cache location was changed."), Brushes.DimGray);
         }
 
         private void RememberPreviousCacheRoot(string path)
@@ -2650,6 +2742,7 @@ namespace PhotoImporter.App
             _inputHistoryLimit = settings.InputHistoryLimit;
             _customExifCacheRoot = settings.CustomExifCacheRoot;
             _lastAppliedPresetId = settings.LastAppliedPresetId;
+            _uiLanguage = AppLocalization.NormalizePreference(settings.UiLanguage);
             _previousExifCacheRoots.Clear();
             _previousExifCacheRoots.AddRange(settings.PreviousExifCacheRoots);
             _previousExifCacheRoots.RemoveAll(
@@ -2676,7 +2769,7 @@ namespace PhotoImporter.App
                                        ex is ArgumentException || ex is NotSupportedException ||
                                        ex is TimeoutException)
             {
-                return "入力履歴を保存できませんでした: " + ex.Message;
+                return AppLocalization.Text("入力履歴を保存できませんでした: ", "Unable to save input history: ") + ex.Message;
             }
         }
 
@@ -2752,7 +2845,8 @@ namespace PhotoImporter.App
                 ShowImagePreview = ShowImagePreview,
                 InputHistoryLimit = _inputHistoryLimit,
                 CustomExifCacheRoot = _customExifCacheRoot,
-                LastAppliedPresetId = SelectedPreset?.Id
+                LastAppliedPresetId = SelectedPreset?.Id,
+                UiLanguage = _uiLanguage
             };
             settings.SidecarExtensions.Clear();
             foreach (var extension in sidecarPolicy.Extensions)
@@ -2768,7 +2862,7 @@ namespace PhotoImporter.App
             {
                 MessageBox.Show(
                     this,
-                    "設定を保存できませんでした。\n" + _settingsStore.SettingsPath + "\n\n" + ex.Message,
+                    AppLocalization.Text("設定を保存できませんでした。\n", "Unable to save settings.\n") + _settingsStore.SettingsPath + "\n\n" + ex.Message,
                     "Photo Importer",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -2806,10 +2900,10 @@ namespace PhotoImporter.App
 
         private static void ValidateRoots(string sourceRoot, string destinationRoot)
         {
-            if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException("コピー元フォルダーが見つかりません。");
-            if (!Directory.Exists(destinationRoot)) throw new DirectoryNotFoundException("コピー先フォルダーが見つかりません。");
+            if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException(AppLocalization.Text("コピー元フォルダーが見つかりません。", "The source folder was not found."));
+            if (!Directory.Exists(destinationRoot)) throw new DirectoryNotFoundException(AppLocalization.Text("コピー先フォルダーが見つかりません。", "The destination folder was not found."));
             if (IsSameOrUnder(sourceRoot, destinationRoot) || IsSameOrUnder(destinationRoot, sourceRoot))
-                throw new InvalidOperationException("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。");
+                throw new InvalidOperationException(AppLocalization.Text("コピー元とコピー先には、同一または互いの配下ではないフォルダーを指定してください。", "The source and destination must be different folders and neither may be inside the other."));
         }
 
         private static SidecarPolicy CreateSidecarPolicy(bool enabled, string extensionText)
@@ -2830,8 +2924,8 @@ namespace PhotoImporter.App
         }
 
         private void ShowTemplateError(TemplateError error) =>
-            SetMessage(string.Format("テンプレートエラー: {0}（位置 {1}）", error.Code, error.Position + 1), Brushes.Firebrick);
-        private void SetMessage(string value, Brush brush) { Message = value; MessageBrush = brush; }
+            SetMessage(AppLocalization.Format("テンプレートエラー: {0}（位置 {1}）", "Template error: {0} (position {1})", error.Code, error.Position + 1), Brushes.Firebrick);
+        private void SetMessage(string value, Brush brush) { Message = AppLocalization.UserMessage(value); MessageBrush = brush; }
 
         private static bool IsSameOrUnder(string path, string root)
         {
@@ -2848,7 +2942,9 @@ namespace PhotoImporter.App
             if (string.Equals(normalizedRoot, normalizedPath, StringComparison.OrdinalIgnoreCase)) return string.Empty;
             var prefix = EnsureTrailingSeparator(normalizedRoot);
             if (!normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("コピー元フォルダー外のパスは処理できません。");
+                throw new InvalidOperationException(AppLocalization.Text(
+                    "コピー元フォルダー外のパスは処理できません。",
+                    "Paths outside the source folder cannot be processed."));
             return normalizedPath.Substring(prefix.Length);
         }
 
@@ -2979,12 +3075,12 @@ namespace PhotoImporter.App
             }
             if (_isExif && _previewItem.MetadataResult == null)
             {
-                Value = "未読み込み";
+                Value = AppLocalization.Text("未読み込み", "Not loaded");
                 return;
             }
             if (_isExif && _previewItem.MetadataResult.Status == PhotoMetadataReadStatus.ReadError)
             {
-                Value = "読取エラー";
+                Value = AppLocalization.Text("読取エラー", "Read error");
                 return;
             }
 
@@ -2993,7 +3089,7 @@ namespace PhotoImporter.App
             var parsed = TemplateParser.Parse(source);
             if (!parsed.IsValid)
             {
-                Value = "書式エラー: " + parsed.Error.Code;
+                Value = AppLocalization.Text("書式エラー: ", "Format error: ") + parsed.Error.Code;
                 return;
             }
 
@@ -3004,134 +3100,136 @@ namespace PhotoImporter.App
                     _previewItem.TemplateContext,
                     _token == TemplateTokenKind.Sequence ? _previewItem.SequenceNumber : null);
                 var tokenValue = evaluated.Length == 0 ? string.Empty : evaluated.Substring(1);
-                Value = tokenValue.Length == 0 ? "（空文字）" : tokenValue;
+                Value = tokenValue.Length == 0 ? AppLocalization.Text("（空文字）", "(Empty string)") : tokenValue;
             }
             catch (TemplateException ex)
             {
-                Value = "書式エラー: " + ex.Error.Code;
+                Value = AppLocalization.Text("書式エラー: ", "Format error: ") + ex.Error.Code;
             }
         }
 
         public static IReadOnlyList<TokenDetailItem> CreateFileSystemItems() => new[]
         {
             Item(TemplateTokenKind.OriginalName,
-                "元ファイル名。最後の拡張子を含みます（例: DSC_0101.NEF）。"),
+                D("元ファイル名。最後の拡張子を含みます（例: DSC_0101.NEF）。", "The original file name, including the final extension (example: DSC_0101.NEF).")),
             Item(TemplateTokenKind.FileName,
-                "元ファイル名から最後の拡張子を除いた部分です（例: DSC_0101）。"),
+                D("元ファイル名から最後の拡張子を除いた部分です（例: DSC_0101）。", "The original file name without its final extension (example: DSC_0101).")),
             Item(TemplateTokenKind.Extension,
-                "最後の拡張子。先頭のピリオドを含み、拡張子がなければ空文字になります（例: .NEF）。"),
+                D("最後の拡張子。先頭のピリオドを含み、拡張子がなければ空文字になります（例: .NEF）。", "The final extension, including its leading period. Empty when there is no extension (example: .NEF).")),
             Item(TemplateTokenKind.SourceRelativeDirectory,
-                "コピー元ルートからファイル格納フォルダーまでの相対パス。コピー元ルート直下では空文字になります。",
+                D("コピー元ルートからファイル格納フォルダーまでの相対パス。コピー元ルート直下では空文字になります。", "The path from the source root to the file's folder. Empty for files directly under the source root."),
                 SourceDirectoryFormatDescription),
             Item(TemplateTokenKind.ModifiedDate,
-                "元ファイルの最終更新日時です。",
+                D("元ファイルの最終更新日時です。", "The original file's last modified date and time."),
                 DateFormatDescription),
             Item(TemplateTokenKind.FileSize,
-                "元ファイルのバイト数を10進整数で表示します。"),
+                D("元ファイルのバイト数を10進整数で表示します。", "The original file size in bytes as a decimal integer.")),
             Item(TemplateTokenKind.Protected,
-                "読み取り専用属性があれば Protected、なければ Unprotected を表示します。"),
+                D("読み取り専用属性があれば Protected、なければ Unprotected を表示します。", "Displays Protected for a read-only file, otherwise Unprotected.")),
             Item(TemplateTokenKind.Sequence,
-                "宛先の競合を避ける連番。競合がなければ空文字、競合時はアンダースコア付きの連番になります。",
+                D("宛先の競合を避ける連番。競合がなければ空文字、競合時はアンダースコア付きの連番になります。", "A sequence number used to avoid destination conflicts. Empty when there is no conflict; otherwise an underscore-prefixed number."),
                 SequenceFormatDescription)
         };
 
         public static IReadOnlyList<TokenDetailItem> CreateExifItems() => new[]
         {
             ExifItem(TemplateTokenKind.TakenDate,
-                "Exifの撮影日時をタイムゾーン変換せず、記録された壁時計値のまま表示します。サブ秒も使用できます。",
+                D("Exifの撮影日時をタイムゾーン変換せず、記録された壁時計値のまま表示します。サブ秒も使用できます。", "Displays the recorded Exif capture time without time-zone conversion. Subseconds are available."),
                 DateFormatDescription),
             ExifItem(TemplateTokenKind.TakenDateLocal,
-                "Exifの撮影日時を、このPCの現在のタイムゾーンへ変換して表示します。",
+                D("Exifの撮影日時を、このPCの現在のタイムゾーンへ変換して表示します。", "Displays the Exif capture time converted to this PC's current time zone."),
                 DateFormatDescription),
             ExifItem(TemplateTokenKind.TakenDateInTimeZone,
-                "Exifの撮影日時を、指定したタイムゾーンへ変換して表示します。",
+                D("Exifの撮影日時を、指定したタイムゾーンへ変換して表示します。", "Displays the Exif capture time converted to the specified time zone."),
                 TimeZoneFormatDescription,
                 "JST|yyyy-MM-dd HH-mm-ss"),
             ExifItem(TemplateTokenKind.CameraMake,
-                "カメラのメーカー名。値がなければ Unknown になります。"),
+                D("カメラのメーカー名。値がなければ Unknown になります。", "Camera manufacturer. Displays Unknown when unavailable.")),
             ExifItem(TemplateTokenKind.CameraModel,
-                "カメラのモデル名。値がなければ Unknown になります。"),
+                D("カメラのモデル名。値がなければ Unknown になります。", "Camera model. Displays Unknown when unavailable.")),
             ExifItem(TemplateTokenKind.CameraSerial,
-                "カメラボディのシリアル番号。値がなければ Unknown になります。"),
+                D("カメラボディのシリアル番号。値がなければ Unknown になります。", "Camera body serial number. Displays Unknown when unavailable.")),
             ExifItem(TemplateTokenKind.Lens,
-                "レンズのモデル名。値がなければ Unknown になります。"),
+                D("レンズのモデル名。値がなければ Unknown になります。", "Lens model. Displays Unknown when unavailable.")),
             ExifItem(TemplateTokenKind.Width,
-                "Exifの向きを反映した画像の幅（ピクセル）です。",
+                D("Exifの向きを反映した画像の幅（ピクセル）です。", "Image width in pixels after applying Exif orientation."),
                 IntegerNumberFormatDescription),
             ExifItem(TemplateTokenKind.Height,
-                "Exifの向きを反映した画像の高さ（ピクセル）です。",
+                D("Exifの向きを反映した画像の高さ（ピクセル）です。", "Image height in pixels after applying Exif orientation."),
                 IntegerNumberFormatDescription),
             ExifItem(TemplateTokenKind.ExifWidth,
-                "Exifに記録された向き反映前の幅（ピクセル）です。",
+                D("Exifに記録された向き反映前の幅（ピクセル）です。", "Width in pixels recorded in Exif before applying orientation."),
                 IntegerNumberFormatDescription),
             ExifItem(TemplateTokenKind.ExifHeight,
-                "Exifに記録された向き反映前の高さ（ピクセル）です。",
+                D("Exifに記録された向き反映前の高さ（ピクセル）です。", "Height in pixels recorded in Exif before applying orientation."),
                 IntegerNumberFormatDescription),
             ExifItem(TemplateTokenKind.Orientation,
-                "Exif Orientation の値（1～8）です。",
+                D("Exif Orientation の値（1～8）です。", "Exif Orientation value (1–8)."),
                 IntegerNumberFormatDescription),
             ExifItem(TemplateTokenKind.Aperture,
-                "絞り値。書式を省略すると F2.8 のように表示します。",
+                D("絞り値。書式を省略すると F2.8 のように表示します。", "Aperture. Without a format, displayed like F2.8."),
                 NumberWithoutUnitFormatDescription),
             ExifItem(TemplateTokenKind.ShutterSpeed,
-                "シャッタースピード。書式を省略すると 1-250s のように表示します。",
+                D("シャッタースピード。書式を省略すると 1-250s のように表示します。", "Shutter speed. Without a format, displayed like 1-250s."),
                 ShutterSpeedFormatDescription),
             ExifItem(TemplateTokenKind.ExposureTime,
-                "露光時間を秒単位の10進数で表示します。既定は小数最大6桁で末尾のゼロを省略します。",
+                D("露光時間を秒単位の10進数で表示します。既定は小数最大6桁で末尾のゼロを省略します。", "Exposure time in seconds as a decimal. By default, shows up to six decimal places and removes trailing zeros."),
                 DecimalNumberFormatDescription),
             ExifItem(TemplateTokenKind.Iso,
-                "ISO感度を整数で表示します。",
+                D("ISO感度を整数で表示します。", "ISO speed as an integer."),
                 IntegerNumberFormatDescription),
             ExifItem(TemplateTokenKind.FocalLength,
-                "焦点距離。書式を省略すると 35mm または 23.5mm のように表示します。",
+                D("焦点距離。書式を省略すると 35mm または 23.5mm のように表示します。", "Focal length. Without a format, displayed like 35mm or 23.5mm."),
                 NumberWithoutUnitFormatDescription),
             ExifItem(TemplateTokenKind.FocalLength35mm,
-                "35mm判換算焦点距離。書式を省略すると 35mm のように表示します。",
+                D("35mm判換算焦点距離。書式を省略すると 35mm のように表示します。", "35mm-equivalent focal length. Without a format, displayed like 35mm."),
                 NumberWithoutUnitFormatDescription),
             ExifItem(TemplateTokenKind.Rating,
-                "評価（スター）を1～5で表示します。除外は Rejected、未評価は Unknown になります。",
+                D("評価（スター）を1～5で表示します。除外は Rejected、未評価は Unknown になります。", "Rating (stars) from 1 to 5. Rejected means excluded and Unknown means unrated."),
                 RatingFormatDescription),
             ExifItem(TemplateTokenKind.HasGps,
-                "有効なGPS位置情報があれば GPS、なければ NoGPS を表示します。"),
+                D("有効なGPS位置情報があれば GPS、なければ NoGPS を表示します。", "Displays GPS when valid GPS coordinates exist; otherwise NoGPS.")),
             ExifItem(TemplateTokenKind.GpsLatitude,
-                "緯度。書式を省略すると符号付き10進度・小数6桁で表示します。",
+                D("緯度。書式を省略すると符号付き10進度・小数6桁で表示します。", "Latitude. Without a format, displays signed decimal degrees with six decimal places."),
                 GpsFormatDescription),
             ExifItem(TemplateTokenKind.GpsLongitude,
-                "経度。書式を省略すると符号付き10進度・小数6桁で表示します。",
+                D("経度。書式を省略すると符号付き10進度・小数6桁で表示します。", "Longitude. Without a format, displays signed decimal degrees with six decimal places."),
                 GpsFormatDescription),
             ExifItem(TemplateTokenKind.GpsAltitude,
-                "高度（メートル）。書式を省略すると 34.5m のように表示し、海面下は負値になります。",
+                D("高度（メートル）。書式を省略すると 34.5m のように表示し、海面下は負値になります。", "Altitude in meters. Without a format, displayed like 34.5m; values below sea level are negative."),
                 NumberWithoutUnitFormatDescription)
         };
 
-        private const string DateFormatDescription =
-            "指定できる書式: .NETカスタム日時書式（InvariantCulture）。既定は yyyyMMdd_HHmmss。" +
-            "指定子は d/dd/ddd/dddd（日）、f～fffffff・F～FFFFFFF（秒の小数部）、g（紀元）、h/hh（12時間）、H/HH（24時間）、K（タイムゾーン）、m/mm（分）、M/MM/MMM/MMMM（月）、s/ss（秒）、t/tt（午前/午後）、y/yy/yyy以上（年）、z/zz/zzz（UTC差）、引用符付きリテラル、%（単独指定子）、\\（エスケープ）です。" +
-            ": と / は日時区切り指定子ですが、結果にコロン、スラッシュなどWindowsパスで使用できない文字を含む書式は指定できません。";
-        private const string TimeZoneFormatDescription =
-            "指定できる書式: タイムゾーン指定子、または タイムゾーン指定子|日時書式。" +
-            "指定子は UTC、JST、PST、MST、CST、EST、GMT、CET、または UTC±H / UTC±HH:MM（UTC-14:00～UTC+14:00）。" +
-            "日時書式を省略した場合は yyyyMMdd_HHmmss。" + DateFormatDescription;
-        private const string IntegerNumberFormatDescription =
-            "指定できる書式: .NET整数書式（InvariantCulture）。標準指定子は C、D、E、F、G、N、P、X（後ろに精度数字を指定可能）。" +
-            "カスタム指定子は 0、#、小数点、桁区切り・スケーリングのコンマ、%、‰、指数 E0/E+0/E-0、\\（エスケープ）、引用符付きリテラル、;（正・負・ゼロのセクション）で、組み合わせて指定できます。" +
-            "結果にWindowsパスで使用できない文字を含む書式は指定できません。値がなければ書式にかかわらず Unknown になります。";
-        private const string DecimalNumberFormatDescription =
-            "指定できる書式: .NET小数書式（InvariantCulture）。標準指定子は C、E、F、G、N、P（後ろに精度数字を指定可能）。" +
-            "カスタム指定子は 0、#、小数点、桁区切り・スケーリングのコンマ、%、‰、指数 E0/E+0/E-0、\\（エスケープ）、引用符付きリテラル、;（正・負・ゼロのセクション）で、組み合わせて指定できます。" +
-            "結果にWindowsパスで使用できない文字を含む書式は指定できません。値がなければ書式にかかわらず Unknown になります。";
-        private const string NumberWithoutUnitFormatDescription =
-            DecimalNumberFormatDescription + " 書式を指定した場合、F、mm、mなどの接頭辞・単位は付かず、数値だけを表示します。";
-        private const string RatingFormatDescription =
-            IntegerNumberFormatDescription + " 書式は評価1～5だけに適用され、Rejected と Unknown には適用されません。";
-        private const string SourceDirectoryFormatDescription =
-            "指定できる書式: 末尾から残す階層数を、先頭ゼロや符号のない1以上の10進整数で指定します。省略時は全階層を表示します。";
-        private const string SequenceFormatDescription =
-            "指定できる書式: 1～9の桁数。省略時は3桁です（例: 4を指定すると _0001）。";
-        private const string ShutterSpeedFormatDescription =
-            "指定できる書式: 1-250s、1-250、1_250s、1_250 の4種類。省略時は1-250sです。";
-        private const string GpsFormatDescription =
-            "指定できる書式: dms（度-分-秒・小数1桁・半球記号）または dm（度-10進分・小数3桁・半球記号）。省略時は符号付き10進度・小数6桁です。";
+        private static readonly string DateFormatDescription = D(
+            "指定できる書式: .NETカスタム日時書式（InvariantCulture）。既定は yyyyMMdd_HHmmss。指定子は d/dd/ddd/dddd（日）、f～fffffff・F～FFFFFFF（秒の小数部）、g（紀元）、h/hh（12時間）、H/HH（24時間）、K（タイムゾーン）、m/mm（分）、M/MM/MMM/MMMM（月）、s/ss（秒）、t/tt（午前/午後）、y/yy/yyy以上（年）、z/zz/zzz（UTC差）、引用符付きリテラル、%（単独指定子）、\\（エスケープ）です。: と / は日時区切り指定子ですが、結果にコロン、スラッシュなどWindowsパスで使用できない文字を含む書式は指定できません。",
+            "Allowed format: .NET custom date/time format using InvariantCulture. Default: yyyyMMdd_HHmmss. Supported specifiers include day, fractional second, era, 12/24-hour, time zone, minute, month, second, AM/PM, year, UTC offset, quoted literals, %, and escaped characters. Formats whose result contains characters invalid in Windows paths, such as colons or slashes, are not allowed.");
+        private static readonly string TimeZoneFormatDescription = D(
+            "指定できる書式: タイムゾーン指定子、または タイムゾーン指定子|日時書式。指定子は UTC、JST、PST、MST、CST、EST、GMT、CET、または UTC±H / UTC±HH:MM（UTC-14:00～UTC+14:00）。日時書式を省略した場合は yyyyMMdd_HHmmss。",
+            "Allowed format: a time-zone specifier, optionally followed by | and a date/time format. Use UTC, JST, PST, MST, CST, EST, GMT, CET, UTC±H, or UTC±HH:MM (UTC-14:00 to UTC+14:00). The default date/time format is yyyyMMdd_HHmmss.") + DateFormatDescription;
+        private static readonly string IntegerNumberFormatDescription = D(
+            "指定できる書式: .NET整数書式（InvariantCulture）。標準指定子は C、D、E、F、G、N、P、X（後ろに精度数字を指定可能）。カスタム指定子は 0、#、小数点、桁区切り・スケーリングのコンマ、%、‰、指数 E0/E+0/E-0、\\（エスケープ）、引用符付きリテラル、;（正・負・ゼロのセクション）で、組み合わせて指定できます。結果にWindowsパスで使用できない文字を含む書式は指定できません。値がなければ書式にかかわらず Unknown になります。",
+            "Allowed format: a .NET integer format using InvariantCulture. Formats whose result contains characters invalid in Windows paths are not allowed. Unknown is displayed when no value exists.");
+        private static readonly string DecimalNumberFormatDescription = D(
+            "指定できる書式: .NET小数書式（InvariantCulture）。標準指定子は C、E、F、G、N、P（後ろに精度数字を指定可能）。カスタム指定子は 0、#、小数点、桁区切り・スケーリングのコンマ、%、‰、指数 E0/E+0/E-0、\\（エスケープ）、引用符付きリテラル、;（正・負・ゼロのセクション）で、組み合わせて指定できます。結果にWindowsパスで使用できない文字を含む書式は指定できません。値がなければ書式にかかわらず Unknown になります。",
+            "Allowed format: a .NET decimal format using InvariantCulture. Formats whose result contains characters invalid in Windows paths are not allowed. Unknown is displayed when no value exists.");
+        private static readonly string NumberWithoutUnitFormatDescription =
+            DecimalNumberFormatDescription + D(" 書式を指定した場合、F、mm、mなどの接頭辞・単位は付かず、数値だけを表示します。", " When a format is specified, only the number is shown without prefixes or units such as F, mm, or m.");
+        private static readonly string RatingFormatDescription =
+            IntegerNumberFormatDescription + D(" 書式は評価1～5だけに適用され、Rejected と Unknown には適用されません。", " The format applies only to ratings 1–5, not Rejected or Unknown.");
+        private static readonly string SourceDirectoryFormatDescription = D(
+            "指定できる書式: 末尾から残す階層数を、先頭ゼロや符号のない1以上の10進整数で指定します。省略時は全階層を表示します。",
+            "Allowed format: a positive decimal integer without a sign or leading zeros indicating how many trailing folder levels to keep. All levels are shown when omitted.");
+        private static readonly string SequenceFormatDescription = D(
+            "指定できる書式: 1～9の桁数。省略時は3桁です（例: 4を指定すると _0001）。",
+            "Allowed format: a width from 1 to 9 digits. The default is 3 digits (for example, 4 produces _0001).");
+        private static readonly string ShutterSpeedFormatDescription = D(
+            "指定できる書式: 1-250s、1-250、1_250s、1_250 の4種類。省略時は1-250sです。",
+            "Allowed formats: 1-250s, 1-250, 1_250s, or 1_250. The default is 1-250s.");
+        private static readonly string GpsFormatDescription = D(
+            "指定できる書式: dms（度-分-秒・小数1桁・半球記号）または dm（度-10進分・小数3桁・半球記号）。省略時は符号付き10進度・小数6桁です。",
+            "Allowed formats: dms (degrees-minutes-seconds with one decimal and hemisphere) or dm (degrees and decimal minutes with three decimals and hemisphere). The default is signed decimal degrees with six decimals.");
+
+        private static string D(string japanese, string english) => AppLocalization.Text(japanese, english);
 
         private static TokenDetailItem Item(
             TemplateTokenKind token,
@@ -3221,25 +3319,25 @@ namespace PhotoImporter.App
         {
             get
             {
-                if (_copyError != null) return "コピーエラー: " + _copyError;
-                if (IsScanError) return "スキャンエラー: " + ErrorMessage;
+                if (_copyError != null) return AppLocalization.Text("コピーエラー: ", "Copy error: ") + AppLocalization.UserMessage(_copyError);
+                if (IsScanError) return AppLocalization.Text("スキャンエラー: ", "Scan error: ") + AppLocalization.UserMessage(ErrorMessage);
                 if (_relatedConflictMessage != null)
-                    return "関連ファイル競合: " + _relatedConflictMessage;
+                    return AppLocalization.Text("関連ファイル競合: ", "Related-file conflict: ") + _relatedConflictMessage;
                 string status;
                 switch (DestinationStatus)
                 {
-                    case DestinationStatus.Imported: status = "取込済"; break;
-                    case DestinationStatus.Overwrite: status = "上書き対象"; break;
-                    case DestinationStatus.Conflict: status = "競合"; break;
-                    default: status = "未取込"; break;
+                    case DestinationStatus.Imported: status = AppLocalization.Text("取込済", "Imported"); break;
+                    case DestinationStatus.Overwrite: status = AppLocalization.Text("上書き対象", "Overwrite"); break;
+                    case DestinationStatus.Conflict: status = AppLocalization.Text("競合", "Conflict"); break;
+                    default: status = AppLocalization.Text("未取込", "Not imported"); break;
                 }
-                if (IsAssociatedSidecar) status = "サイドカー" + status;
+                if (IsAssociatedSidecar) status = AppLocalization.Text("サイドカー", "Sidecar: ") + status;
                 if (Warnings.Contains(TemplateWarningCode.TakenDateFallbackToModifiedDate))
-                    status += "（撮影日時なし: 更新日時を使用）";
+                    status += AppLocalization.Text("（撮影日時なし: 更新日時を使用）", " (no capture date: using modified date)");
                 else if (Warnings.Contains(TemplateWarningCode.TakenDateOffsetMissing))
-                    status += "（Exif時差なし）";
+                    status += AppLocalization.Text("（Exif時差なし）", " (no Exif UTC offset)");
                 if (Warnings.Contains(TemplateWarningCode.OrphanSidecarForcedSequence))
-                    status += "（孤立サイドカーを避けて連番を使用）";
+                    status += AppLocalization.Text("（孤立サイドカーを避けて連番を使用）", " (sequence used to avoid orphaned sidecar)");
                 return status;
             }
         }
@@ -3247,7 +3345,7 @@ namespace PhotoImporter.App
         internal void BlockByRelatedConflict(string message)
         {
             _relatedConflictMessage = string.IsNullOrWhiteSpace(message)
-                ? "関連ファイルを安全にコピーできません。"
+                ? AppLocalization.Text("関連ファイルを安全にコピーできません。", "The related file cannot be copied safely.")
                 : message;
             DestinationStatus = DestinationStatus.Conflict;
             CopyPlan = null;
@@ -3259,7 +3357,9 @@ namespace PhotoImporter.App
 
         public void SetCopyError(string error)
         {
-            _copyError = string.IsNullOrWhiteSpace(error) ? "不明なコピーエラー" : error;
+            _copyError = string.IsNullOrWhiteSpace(error)
+                ? AppLocalization.Text("不明なコピーエラー", "Unknown copy error")
+                : error;
             _isSelected = false;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCopy)));

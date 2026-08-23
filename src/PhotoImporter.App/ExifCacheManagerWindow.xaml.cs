@@ -45,6 +45,7 @@ namespace PhotoImporter.App
                 .ToList();
             _sourceFolder = sourceFolder;
             InitializeComponent();
+            WpfLocalizer.Localize(this);
             DataContext = this;
             Loaded += async (sender, args) => await RefreshAsync();
         }
@@ -98,7 +99,7 @@ namespace PhotoImporter.App
             var previousRootPath = SelectedRoot?.Info.RootPath;
             var previousSerial = preferredSerial ?? SelectedCard?.Info.VolumeSerialNumber;
             SetBusy(true);
-            SetStatus("Exif キャッシュを確認しています...", Brushes.DimGray);
+            SetStatus(AppLocalization.Text("Exif キャッシュを確認しています...", "Inspecting the Exif cache..."), Brushes.DimGray);
             try
             {
                 var currentRoot = CurrentRoot;
@@ -128,12 +129,12 @@ namespace PhotoImporter.App
 
                 SynchronizePreviousRoots();
                 var cardCount = Roots.Sum(root => root.Cards.Count);
-                SetStatus(string.Format(CultureInfo.CurrentCulture, "{0} 件のキャッシュを確認しました。", cardCount), Brushes.DimGray);
+                SetStatus(AppLocalization.Format("{0} 件のキャッシュを確認しました。", "Inspected {0} cached cards.", cardCount), Brushes.DimGray);
                 return true;
             }
             catch (Exception ex) when (IsManagementFailure(ex))
             {
-                SetStatus("Exif キャッシュを確認できませんでした: " + ex.Message, Brushes.Firebrick);
+                SetStatus(AppLocalization.Text("Exif キャッシュを確認できませんでした: ", "Unable to inspect the Exif cache: ") + ex.Message, Brushes.Firebrick);
                 return false;
             }
             finally
@@ -147,22 +148,22 @@ namespace PhotoImporter.App
             var selected = SelectedCard;
             if (selected == null) return;
             var name = PromptForText(
-                "カードの名前を変更",
-                "目印となる名前を入力してください。空にすると名前を解除します。",
+                AppLocalization.Text("カードの名前を変更", "Rename card"),
+                AppLocalization.Text("目印となる名前を入力してください。空にすると名前を解除します。", "Enter a descriptive name. Leave it empty to remove the name."),
                 selected.Info.DisplayName ?? string.Empty,
-                "保存");
+                AppLocalization.Text("保存", "Save"));
             if (name == null) return;
             if (name.Trim().Length > ExifCacheManager.MaximumDisplayNameLength)
             {
                 MessageBox.Show(this,
-                    string.Format(CultureInfo.CurrentCulture, "名前は{0}文字以内で入力してください。", ExifCacheManager.MaximumDisplayNameLength),
-                    "カードの名前を変更", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppLocalization.Format("名前は{0}文字以内で入力してください。", "Enter a name of no more than {0} characters.", ExifCacheManager.MaximumDisplayNameLength),
+                    AppLocalization.Text("カードの名前を変更", "Rename card"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             await RunOperationAsync(
                 () => _manager.RenameCard(selected.Info.CacheRoot, selected.Info.VolumeSerialNumber, name),
-                "カードの名前を変更しました。",
+                AppLocalization.Text("カードの名前を変更しました。", "The card was renamed."),
                 selected.Info.VolumeSerialNumber);
         }
 
@@ -171,27 +172,27 @@ namespace PhotoImporter.App
             var selected = SelectedCard;
             if (selected == null) return;
             var text = PromptForText(
-                "古いエントリを整理",
-                "最後に使われてから何日より古いエントリを削除しますか？ 日付はUTC基準です。",
+                AppLocalization.Text("古いエントリを整理", "Remove old entries"),
+                AppLocalization.Text("最後に使われてから何日より古いエントリを削除しますか？ 日付はUTC基準です。", "Remove entries older than how many days since last use? Dates are based on UTC."),
                 "30",
-                "確認へ");
+                AppLocalization.Text("確認へ", "Continue"));
             int days;
             if (text == null) return;
             if (!int.TryParse(text, NumberStyles.None, CultureInfo.CurrentCulture, out days) || days < 1 || days > 36500)
             {
-                MessageBox.Show(this, "日数は1～36500の整数で入力してください。",
-                    "古いエントリを整理", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, AppLocalization.Text("日数は1～36500の整数で入力してください。", "Enter an integer from 1 to 36500."),
+                    AppLocalization.Text("古いエントリを整理", "Remove old entries"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             var cutoff = DateTime.UtcNow.Date.AddDays(-days);
             var confirmation = MessageBox.Show(this,
-                string.Format(CultureInfo.CurrentCulture,
-                    "「{0}」から、最後に使われた日が {1:yyyy-MM-dd} より前のエントリを削除します。\n\n" +
-                    "Exif キャッシュを削除しても写真ファイルは削除されません。次回のスキャンで再解析されるため、処理が遅くなる場合があります。",
+                AppLocalization.Format(
+                    "「{0}」から、最後に使われた日が {1:yyyy-MM-dd} より前のエントリを削除します。\n\nExif キャッシュを削除しても写真ファイルは削除されません。次回のスキャンで再解析されるため、処理が遅くなる場合があります。",
+                    "Remove entries from \"{0}\" whose last-used date is before {1:yyyy-MM-dd}.\n\nDeleting the Exif cache does not delete photo files. The next scan may take longer because the files must be analyzed again.",
                     selected.Name,
                     cutoff),
-                "古いエントリを整理",
+                AppLocalization.Text("古いエントリを整理", "Remove old entries"),
                 MessageBoxButton.OKCancel,
                 MessageBoxImage.Warning);
             if (confirmation != MessageBoxResult.OK) return;
@@ -205,7 +206,7 @@ namespace PhotoImporter.App
                 null,
                 selected.Info.VolumeSerialNumber);
             if (succeeded)
-                SetStatus(string.Format(CultureInfo.CurrentCulture, "{0} 件の古いエントリを削除しました。", removed), Brushes.DimGray);
+                SetStatus(AppLocalization.Format("{0} 件の古いエントリを削除しました。", "Removed {0} old entries.", removed), Brushes.DimGray);
         }
 
         private async void DeleteCard_Click(object sender, RoutedEventArgs e)
@@ -213,29 +214,28 @@ namespace PhotoImporter.App
             var selected = SelectedCard;
             if (selected == null) return;
             var confirmation = MessageBox.Show(this,
-                string.Format(CultureInfo.CurrentCulture,
-                    "「{0}」の Exif キャッシュをすべて削除します。\n\n" +
-                    "ボリューム: {1}\nキャッシュ: {2} / {3}\n\n" +
-                    "写真ファイルは削除されません。次回のスキャンでExif情報を再解析するため、処理が遅くなる場合があります。",
+                AppLocalization.Format(
+                    "「{0}」の Exif キャッシュをすべて削除します。\n\nボリューム: {1}\nキャッシュ: {2} / {3}\n\n写真ファイルは削除されません。次回のスキャンでExif情報を再解析するため、処理が遅くなる場合があります。",
+                    "Delete the entire Exif cache for \"{0}\".\n\nVolume: {1}\nCache: {2} / {3}\n\nPhoto files will not be deleted. The next scan may take longer because Exif data must be analyzed again.",
                     selected.Name,
                     selected.Info.VolumeSerialNumberHex,
                     selected.CacheSizeText,
                     selected.EntryCountText),
-                "カードのキャッシュを削除",
+                AppLocalization.Text("カードのキャッシュを削除", "Delete card cache"),
                 MessageBoxButton.OKCancel,
                 MessageBoxImage.Warning);
             if (confirmation != MessageBoxResult.OK) return;
 
             await RunOperationAsync(
                 () => _manager.DeleteCard(selected.Info.CacheRoot, selected.Info.VolumeSerialNumber),
-                "カードの Exif キャッシュを削除しました。",
+                AppLocalization.Text("カードの Exif キャッシュを削除しました。", "The card's Exif cache was deleted."),
                 null);
         }
 
         private async Task<bool> RunOperationAsync(Action operation, string successMessage, uint? preferredSerial)
         {
             SetBusy(true);
-            SetStatus("処理しています...", Brushes.DimGray);
+            SetStatus(AppLocalization.Text("処理しています...", "Processing..."), Brushes.DimGray);
             try
             {
                 await Task.Run(operation);
@@ -245,8 +245,8 @@ namespace PhotoImporter.App
             }
             catch (Exception ex) when (IsManagementFailure(ex))
             {
-                SetStatus("操作を完了できませんでした: " + ex.Message, Brushes.Firebrick);
-                MessageBox.Show(this, ex.Message, "Exif キャッシュの管理", MessageBoxButton.OK, MessageBoxImage.Warning);
+                SetStatus(AppLocalization.Text("操作を完了できませんでした: ", "Unable to complete the operation: ") + ex.Message, Brushes.Firebrick);
+                MessageBox.Show(this, AppLocalization.UserMessage(ex.Message), AppLocalization.Text("Exif キャッシュの管理", "Manage Exif Cache"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
             finally
@@ -323,7 +323,7 @@ namespace PhotoImporter.App
             };
             var cancel = new Button
             {
-                Content = "キャンセル",
+                Content = AppLocalization.Text("キャンセル", "Cancel"),
                 MinWidth = 90,
                 Padding = new Thickness(10, 4, 10, 4),
                 Margin = new Thickness(8, 0, 0, 0),
@@ -363,11 +363,13 @@ namespace PhotoImporter.App
 
         public ExifCacheRootInfo Info { get; }
         public IReadOnlyList<ExifCacheCardListItem> Cards { get; }
-        public string Title => Info.IsCurrent ? "現在の保存先" : "以前の保存先";
+        public string Title => Info.IsCurrent
+            ? AppLocalization.Text("現在の保存先", "Current location")
+            : AppLocalization.Text("以前の保存先", "Previous location");
         public string Path => Info.RootPath;
         public string Summary => Info.Exists
-            ? string.Format(CultureInfo.CurrentCulture, "{0} 件 / {1}", Cards.Count, FormatSize(Info.CacheSizeBytes))
-            : "フォルダーは存在しません";
+            ? AppLocalization.Format("{0} 件 / {1}", "{0} entries / {1}", Cards.Count, FormatSize(Info.CacheSizeBytes))
+            : AppLocalization.Text("フォルダーは存在しません", "Folder does not exist");
         public string Warning => Info.Warning;
         public bool HasCards => Cards.Count != 0;
 
@@ -394,37 +396,37 @@ namespace PhotoImporter.App
         }
 
         public ExifCacheCardInfo Info { get; }
-        public string StateText => Info.IsCurrentSource ? "現在のコピー元" : string.Empty;
+        public string StateText => Info.IsCurrentSource ? AppLocalization.Text("現在のコピー元", "Current source") : string.Empty;
         public string Name => !string.IsNullOrWhiteSpace(Info.DisplayName)
             ? Info.DisplayName
-            : !string.IsNullOrWhiteSpace(Info.VolumeLabel) ? Info.VolumeLabel : "（名前なし）";
+            : !string.IsNullOrWhiteSpace(Info.VolumeLabel) ? Info.VolumeLabel : AppLocalization.Text("（名前なし）", "(Unnamed)");
         public string VolumeText => string.Format(CultureInfo.CurrentCulture, "{0} / {1}",
-            string.IsNullOrWhiteSpace(Info.VolumeLabel) ? "ラベルなし" : Info.VolumeLabel,
+            string.IsNullOrWhiteSpace(Info.VolumeLabel) ? AppLocalization.Text("ラベルなし", "No label") : Info.VolumeLabel,
             Info.VolumeSerialNumberHex);
         public string DriveText
         {
             get
             {
-                if (!Info.DriveType.HasValue) return "不明";
+                if (!Info.DriveType.HasValue) return AppLocalization.Text("不明", "Unknown");
                 switch (Info.DriveType.Value)
                 {
-                    case DriveType.Removable: return "リムーバブル";
-                    case DriveType.Fixed: return "固定";
-                    case DriveType.Network: return "ネットワーク";
-                    case DriveType.CDRom: return "光学ドライブ";
+                    case DriveType.Removable: return AppLocalization.Text("リムーバブル", "Removable");
+                    case DriveType.Fixed: return AppLocalization.Text("固定", "Fixed");
+                    case DriveType.Network: return AppLocalization.Text("ネットワーク", "Network");
+                    case DriveType.CDRom: return AppLocalization.Text("光学ドライブ", "Optical drive");
                     case DriveType.Ram: return "RAM";
-                    default: return "不明";
+                    default: return AppLocalization.Text("不明", "Unknown");
                 }
             }
         }
         public string TotalSizeText => Info.TotalBytes.HasValue
             ? ExifCacheRootListItem.FormatSize(checked((long)Math.Min(Info.TotalBytes.Value, (ulong)long.MaxValue)))
-            : "不明";
+            : AppLocalization.Text("不明", "Unknown");
         public string CacheSizeText => ExifCacheRootListItem.FormatSize(Info.CacheSizeBytes);
-        public string EntryCountText => string.Format(CultureInfo.CurrentCulture, "{0:N0} 件", Info.EntryCount);
+        public string EntryCountText => AppLocalization.Format("{0:N0} 件", "{0:N0} entries", Info.EntryCount);
         public string LastUsedText => Info.LastUsedUtcDate.HasValue
             ? Info.LastUsedUtcDate.Value.ToString("yyyy-MM-dd", CultureInfo.CurrentCulture)
-            : "未記録";
+            : AppLocalization.Text("未記録", "Not recorded");
         public string Warning => Info.Warning;
     }
 }

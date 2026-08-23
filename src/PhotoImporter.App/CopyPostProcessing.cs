@@ -18,11 +18,11 @@ namespace PhotoImporter.App
             }
             catch (FilterEvaluationException ex)
             {
-                return "フィルター評価エラー: " + ex.Message;
+                return AppLocalization.Text("フィルター評価エラー: ", "Filter evaluation error: ") + ex.Message;
             }
             catch (Exception ex)
             {
-                return "一覧更新エラー: " + ex.Message;
+                return AppLocalization.Text("一覧更新エラー: ", "List update error: ") + ex.Message;
             }
         }
     }
