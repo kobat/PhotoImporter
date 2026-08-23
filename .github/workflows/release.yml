@@ -34,7 +34,9 @@ jobs:
           } else {
             $version = $env:GITHUB_REF_NAME.Substring(1)
           }
+          $isPrerelease = $version -match '^0\.'
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "IS_PRERELEASE=$($isPrerelease.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build release archive
         shell: pwsh
@@ -67,6 +69,9 @@ jobs:
             $arguments += @('--notes-file', $notes)
           } else {
             $arguments += '--generate-notes'
+          }
+          if ($env:IS_PRERELEASE -eq 'true') {
+            $arguments += '--prerelease'
           }
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

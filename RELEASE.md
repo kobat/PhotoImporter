@@ -26,7 +26,9 @@ selection, and license screen in both Japanese and English.
 - `CI` builds and tests every pull request and every push to `main`.
 - `Release` can be run manually to produce a downloadable workflow artifact.
 - Pushing a semantic version tag such as `v0.1.0` builds the same archive and
-  publishes it with its SHA-256 file as a GitHub Release.
+  publishes it with its SHA-256 file as a GitHub Release. Versions whose major
+  version is `0` are published as prereleases; `v1.0.0` and later are published
+  as regular releases.
 
 The tag version must match `<Version>` in
 `src/PhotoImporter.App/PhotoImporter.App.csproj`; otherwise the release build
@@ -41,7 +43,8 @@ stops before publishing.
    `Licenses` are present and readable.
 4. Confirm that the SHA-256 file matches the ZIP.
 5. Create and push the `v0.1.0` tag.
-6. Review the generated GitHub Release notes and attached files.
+6. Confirm that the GitHub Release is marked as a prerelease, then review its
+   notes and attached files.
 
 ## Signing status
 
