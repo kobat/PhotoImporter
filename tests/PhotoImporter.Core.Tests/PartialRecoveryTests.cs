@@ -8,6 +8,7 @@ using Xunit;
 
 namespace PhotoImporter.Core.Tests
 {
+    [Collection(JapaneseLocalizationCollection.Name)]
     public sealed class PartialRecoveryTests : IDisposable
     {
         private readonly string _root = Path.Combine(

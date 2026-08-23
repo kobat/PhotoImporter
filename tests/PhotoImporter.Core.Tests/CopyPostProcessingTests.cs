@@ -5,6 +5,7 @@ using Xunit;
 
 namespace PhotoImporter.Core.Tests
 {
+    [Collection(JapaneseLocalizationCollection.Name)]
     public sealed class CopyPostProcessingTests
     {
         [Fact]

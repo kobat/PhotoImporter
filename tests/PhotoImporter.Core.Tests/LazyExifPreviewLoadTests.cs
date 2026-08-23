@@ -12,6 +12,7 @@ using Xunit;
 
 namespace PhotoImporter.Core.Tests
 {
+    [Collection(JapaneseLocalizationCollection.Name)]
     public sealed class LazyExifPreviewLoadTests : IDisposable
     {
         private readonly string _root;
