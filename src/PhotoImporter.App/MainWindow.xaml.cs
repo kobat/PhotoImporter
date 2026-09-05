@@ -138,6 +138,7 @@ namespace PhotoImporter.App
                 AppLocalization.Text("バージョン情報(&A)...", "About(&A)..."),
                 ShowAboutWindow);
             _itemCollectionState = new PreviewItemCollectionState(Items);
+            Items.CollectionChanged += (sender, args) => InvalidateSuggestions();
             FilterFieldOptions = FilterFieldOption.CreateAll();
             DataContext = this;
             string historyWarning = null;
@@ -1658,6 +1659,7 @@ namespace PhotoImporter.App
 
         private void PreviewItem_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
+            if (e.PropertyName != nameof(PreviewItem.IsSelected)) InvalidateSuggestions();
             if (e.PropertyName == nameof(PreviewItem.IsSelected))
             {
                 if (_isUpdatingSelection) return;
@@ -1806,7 +1808,7 @@ namespace PhotoImporter.App
             }
         }
 
-        private async Task<bool> LoadExifForFilterAsync(PreparedFilter prepared, int conditionCount)
+        private async Task<bool> LoadExifForFilterAsync(PreparedFilter prepared, int conditionCount, bool applyFilter = true)
         {
             CancellationTokenSource scanCancellation = null;
             SetBusy(true, false);
@@ -1846,13 +1848,17 @@ namespace PhotoImporter.App
                 var commit = loadResult.PrepareCommit(Items, prepared);
                 commit.Apply();
                 _exifCacheHits = loadResult.CacheHits;
-                _appliedFilter = conditionCount == 0 ? null : prepared;
-                CommitAppliedFilterEditorState(conditionCount);
+                if (applyFilter)
+                {
+                    _appliedFilter = conditionCount == 0 ? null : prepared;
+                    CommitAppliedFilterEditorState(conditionCount);
+                }
                 ApplyPreviewFilter(_appliedFilter == null
                     ? (Predicate<PreviewItem>)null
                     : item => _appliedFilter.Matches(item.CreateFilterCandidate()));
                 SetMessage(loadResult.Warnings.Count == 0
-                    ? AppLocalization.Format("Exif情報を読み込み、一覧フィルターを適用しました（{0} 条件）。", "Exif data loaded and list filter applied ({0} conditions).", conditionCount)
+                    ? !applyFilter ? AppLocalization.Text("候補に使うExif情報を読み込みました。", "Exif data is ready for candidates.")
+                    : AppLocalization.Format("Exif情報を読み込み、一覧フィルターを適用しました（{0} 条件）。", "Exif data loaded and list filter applied ({0} conditions).", conditionCount)
                     : string.Join(" ", loadResult.Warnings),
                     loadResult.Warnings.Count == 0 ? Brushes.DimGray : Brushes.DarkGoldenrod);
                 return true;

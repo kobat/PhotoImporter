@@ -244,14 +244,17 @@ namespace PhotoImporter.Core.Filtering
             FilterField field,
             IEnumerable<T> choices,
             bool includeMatches = true,
-            bool includeUnknown = false)
+            bool includeUnknown = false,
+            bool caseSensitive = false)
             : base(field, includeMatches, includeUnknown)
         {
             if (choices == null) throw new ArgumentNullException(nameof(choices));
             Choices = new ReadOnlyCollection<T>(choices.Distinct().ToList());
+            CaseSensitive = caseSensitive;
         }
 
         public IReadOnlyList<T> Choices { get; }
+        public bool CaseSensitive { get; }
 
         internal override bool TryPrepare(
             out PreparedFilterCondition condition,
@@ -277,7 +280,7 @@ namespace PhotoImporter.Core.Filtering
                 return false;
             }
             IEqualityComparer<object> comparer;
-            if (typeof(T) == typeof(string)) comparer = new ObjectStringComparer();
+            if (typeof(T) == typeof(string) && !CaseSensitive) comparer = new ObjectStringComparer();
             else comparer = EqualityComparer<object>.Default;
             var selected = new HashSet<object>(Choices.Cast<object>(), comparer);
             condition = new PreparedFilterCondition(
@@ -353,6 +356,7 @@ namespace PhotoImporter.Core.Filtering
                     ? (decimal)sequence.Value.Number.Value
                     : (decimal)value;
                 if (Field == FilterField.Rating && number == -1) return IncludeRejectedRating;
+                if (!Minimum.HasValue && !Maximum.HasValue) return false;
                 return (!Minimum.HasValue || number >= Minimum.Value) &&
                        (!Maximum.HasValue || number <= Maximum.Value);
             });

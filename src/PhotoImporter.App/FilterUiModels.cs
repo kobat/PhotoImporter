@@ -118,6 +118,76 @@ namespace PhotoImporter.App
         private bool _includeUnknown;
         private bool _includeNoSequence;
         private bool _includeRejectedRating;
+        private string[] _selectedValues = new string[0];
+        public IReadOnlyList<string> SelectedValues => _selectedValues;
+        public bool UsesSelectedValues => _selectedValues.Length != 0;
+        public bool IsStringInput => IsString && !UsesSelectedValues;
+        public string SuggestionButtonText => AppLocalization.Text("候補から選択...", "Choose from scan...");
+        public string ManualInputButtonText => AppLocalization.Text("文字列入力に戻す", "Use text input");
+        public string SelectedValuesSummary => string.Join(AppLocalization.Text(" または ", " or "), _selectedValues);
+
+        public FilterConditionEditor Clone()
+        {
+            var copy = new FilterConditionEditor(_fieldOptions);
+            copy.CopyFrom(this);
+            return copy;
+        }
+
+        public void CopyFrom(FilterConditionEditor source)
+        {
+            SelectedField = source.SelectedField;
+            SelectedStringMatchMode = StringMatchModes.Single(option => option.Value == source.SelectedStringMatchMode.Value);
+            SelectedTargetMode = TargetModes.Single(option => option.Value == source.SelectedTargetMode.Value);
+            Pattern = source.Pattern;
+            MinimumText = source.MinimumText; MaximumText = source.MaximumText;
+            StartDate = source.StartDate; EndDate = source.EndDate;
+            StartTimeText = source.StartTimeText; EndTimeText = source.EndTimeText;
+            TimeZoneSpecifier = source.TimeZoneSpecifier;
+            CaseSensitive = source.CaseSensitive;
+            IncludeUnknown = source.IncludeUnknown;
+            IncludeNoSequence = source.IncludeNoSequence;
+            IncludeRejectedRating = source.IncludeRejectedRating;
+            foreach (var choice in Choices)
+                choice.IsSelected = source.Choices.Any(item => Equals(item.Value, choice.Value) && item.IsSelected);
+            SetSelectedValues(source.SelectedValues);
+        }
+
+        public void SetSelectedValues(IEnumerable<string> values)
+        {
+            _selectedValues = values.Distinct(StringComparer.Ordinal).ToArray();
+            OnPropertyChanged(nameof(UsesSelectedValues));
+            OnPropertyChanged(nameof(IsStringInput));
+            OnPropertyChanged(nameof(SelectedValuesSummary));
+            NotifyValidation();
+        }
+
+        public void UseSuggestion(object value, string boundary = "Equal", bool exactTime = false)
+        {
+            if (IsString) { SetSelectedValues(new[] { (string)value }); return; }
+            if (IsChoice)
+            {
+                foreach (var choice in Choices) choice.IsSelected = Equals(choice.Value, value);
+                return;
+            }
+            if (IsDateTime)
+            {
+                var date = (DateTime)value;
+                var time = exactTime ? date.ToString(date.Ticks % TimeSpan.TicksPerSecond == 0 ? "HH:mm:ss" : "HH:mm:ss.fffffff", CultureInfo.InvariantCulture) : string.Empty;
+                if (boundary != "Maximum") { StartDate = date.Date; StartTimeText = time; }
+                if (boundary != "Minimum") { EndDate = date.Date; EndTimeText = time; }
+                return;
+            }
+            IncludeNoSequence = value is FilterSpecialValue;
+            IncludeRejectedRating = IsRating && Equals(value, -1m);
+            if (IncludeNoSequence || IncludeRejectedRating)
+            {
+                MinimumText = MaximumText = string.Empty;
+                return;
+            }
+            var text = Convert.ToString(value, SelectedField.Field == FilterField.FileSize ? CultureInfo.InvariantCulture : CultureInfo.CurrentCulture);
+            if (boundary != "Maximum") MinimumText = text;
+            if (boundary != "Minimum") MaximumText = text;
+        }
 
         public FilterConditionEditor(IReadOnlyList<FilterFieldOption> fieldOptions)
         {
@@ -152,6 +222,7 @@ namespace PhotoImporter.App
             {
                 if (_selectedField == value || value == null) return;
                 _selectedField = value;
+                _selectedValues = new string[0];
 
                 var includeUnknownChanged = _includeUnknown;
                 var includeNoSequenceChanged = _includeNoSequence;
@@ -239,6 +310,7 @@ namespace PhotoImporter.App
             SelectedStringMatchMode?.Value.ToString() ?? string.Empty,
             SelectedTargetMode?.Value.ToString() ?? string.Empty,
             Pattern,
+            string.Join("", _selectedValues.Select(value => value.Length + ":" + value)),
             MinimumText,
             MaximumText,
             StartDate?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
@@ -265,6 +337,12 @@ namespace PhotoImporter.App
                 switch (ValueType)
                 {
                     case FilterValueType.String:
+                        if (UsesSelectedValues)
+                        {
+                            condition = new ChoiceFilterCondition<string>(field, _selectedValues,
+                                includeMatches, IncludeUnknown, field != FilterField.Extension && CaseSensitive);
+                            break;
+                        }
                         condition = new StringFilterCondition(
                             field, Pattern, SelectedStringMatchMode.Value,
                             field != FilterField.Extension && CaseSensitive,
@@ -361,7 +439,7 @@ namespace PhotoImporter.App
             TimeSpan time;
             if (!TimeSpan.TryParseExact(
                     timeText.Trim(),
-                    new[] { @"h\:mm", @"hh\:mm", @"h\:mm\:ss", @"hh\:mm\:ss" },
+                    new[] { @"h\:mm", @"hh\:mm", @"h\:mm\:ss", @"hh\:mm\:ss", @"hh\:mm\:ss\.fffffff" },
                     CultureInfo.InvariantCulture,
                     out time) || time < TimeSpan.Zero || time >= TimeSpan.FromDays(1)) return false;
             value = date.Value.Date.Add(time);
@@ -373,6 +451,7 @@ namespace PhotoImporter.App
             switch (ValueType)
             {
                 case FilterValueType.String:
+                    if (UsesSelectedValues) return AppLocalization.Text("候補と完全一致: ", "Exact choices: ") + SelectedValuesSummary;
                     return AppLocalization.IsEnglish
                         ? (SelectedStringMatchMode?.DisplayName ?? "Text") + " \"" + Pattern + "\""
                         : (SelectedStringMatchMode?.DisplayName ?? "文字列") + "「" + Pattern + "」";
@@ -471,6 +550,9 @@ namespace PhotoImporter.App
         private void NotifyAll()
         {
             OnPropertyChanged(nameof(SelectedField));
+            OnPropertyChanged(nameof(UsesSelectedValues));
+            OnPropertyChanged(nameof(IsStringInput));
+            OnPropertyChanged(nameof(SelectedValuesSummary));
             OnPropertyChanged(nameof(ValueType)); OnPropertyChanged(nameof(IsString));
             OnPropertyChanged(nameof(IsNumber)); OnPropertyChanged(nameof(IsDateTime));
             OnPropertyChanged(nameof(IsChoice)); OnPropertyChanged(nameof(IsTimeZoneDate));

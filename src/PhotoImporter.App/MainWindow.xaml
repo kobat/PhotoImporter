@@ -366,10 +366,16 @@
             </Grid>
         <DataGrid Grid.Row="2" ItemsSource="{Binding ItemsView}"
                   SelectedItem="{Binding SelectedPreviewItem, Mode=TwoWay}"
+                  PreviewMouseRightButtonDown="PreviewRow_RightClick"
                   AutoGenerateColumns="False"
                   CanUserAddRows="False" HeadersVisibility="Column"
                   GridLinesVisibility="Horizontal" EnableRowVirtualization="True"
                   IsEnabled="{Binding CanSelectItems}">
+            <DataGrid.ContextMenu>
+                <ContextMenu Opened="FilterFromFileMenu_Opened">
+                    <MenuItem Header="このファイルから条件を追加..." Click="AddFilterFromFile_Click" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
             <DataGrid.Columns>
                 <DataGridCheckBoxColumn Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
                                         ElementStyle="{StaticResource CopyTargetCheckBoxStyle}"
@@ -456,6 +462,23 @@
                                                                 AutomationProperties.Name="このフィルター条件を削除" />
                                                     </Grid>
 
+                                                    <WrapPanel Margin="0,7,0,0">
+                                                        <Button Content="{Binding SuggestionButtonText}" Click="ShowFilterSuggestions_Click" Padding="10,3"
+                                                                AutomationProperties.AutomationId="ChooseFilterSuggestions"
+                                                                AutomationProperties.Name="{Binding SuggestionButtonText}" />
+                                                        <StackPanel Orientation="Horizontal" Margin="10,0,0,0">
+                                                            <StackPanel.Style>
+                                                                <Style TargetType="StackPanel">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers><DataTrigger Binding="{Binding UsesSelectedValues}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                                                                </Style>
+                                                            </StackPanel.Style>
+                                                            <TextBlock Text="{Binding SelectedValuesSummary}" MaxWidth="450" TextTrimming="CharacterEllipsis"
+                                                                       ToolTip="{Binding SelectedValuesSummary}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                            <Button Content="{Binding ManualInputButtonText}" Click="UseManualFilterText_Click" Padding="10,3"
+                                                                    AutomationProperties.AutomationId="UseManualFilterText"/>
+                                                        </StackPanel>
+                                                    </WrapPanel>
                                                     <Grid Margin="0,7,0,0">
                                                         <Grid.Style>
                                                             <Style TargetType="Grid">
@@ -473,9 +496,11 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <ComboBox ItemsSource="{Binding StringMatchModes}"
+                                                                  IsEnabled="{Binding IsStringInput}"
                                                                   DisplayMemberPath="DisplayName"
                                                                   SelectedItem="{Binding SelectedStringMatchMode, Mode=TwoWay}" />
                                                         <TextBox Grid.Column="1" Margin="8,0"
+                                                                 IsEnabled="{Binding IsStringInput}"
                                                                  Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                                  AutomationProperties.Name="比較する文字列" />
                                                         <CheckBox Grid.Column="2" Content="大文字・小文字を区別"
