@@ -57,6 +57,8 @@ namespace PhotoImporter.App
                 ["フィルター条件"] = "Filter conditions",
                 ["このファイルから条件を追加..."] = "Add condition from this file...",
                 ["候補から選択..."] = "Choose from scan...",
+                ["候補を変更..."] = "Change choices...",
+                ["候補と完全一致:"] = "Exact choices:",
                 ["スキャン結果から条件を選択"] = "Choose filter values from scanned files",
                 ["文字列入力に戻す"] = "Use text input",
                 ["候補から条件を指定"] = "Choose filter values",

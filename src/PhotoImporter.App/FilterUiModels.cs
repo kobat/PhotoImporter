@@ -122,7 +122,9 @@ namespace PhotoImporter.App
         public IReadOnlyList<string> SelectedValues => _selectedValues;
         public bool UsesSelectedValues => _selectedValues.Length != 0;
         public bool IsStringInput => IsString && !UsesSelectedValues;
-        public string SuggestionButtonText => AppLocalization.Text("候補から選択...", "Choose from scan...");
+        public string SuggestionButtonText => UsesSelectedValues
+            ? AppLocalization.Text("候補を変更...", "Change choices...")
+            : AppLocalization.Text("候補から選択...", "Choose from scan...");
         public string ManualInputButtonText => AppLocalization.Text("文字列入力に戻す", "Use text input");
         public string SelectedValuesSummary => string.Join(AppLocalization.Text(" または ", " or "), _selectedValues);
 
@@ -158,6 +160,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(UsesSelectedValues));
             OnPropertyChanged(nameof(IsStringInput));
             OnPropertyChanged(nameof(SelectedValuesSummary));
+            OnPropertyChanged(nameof(SuggestionButtonText));
             NotifyValidation();
         }
 
@@ -201,8 +204,8 @@ namespace PhotoImporter.App
             };
             TargetModes = new[]
             {
-                new DisplayOption<bool>(true, AppLocalization.Text("一致する項目を対象にする", "Include matching items")),
-                new DisplayOption<bool>(false, AppLocalization.Text("一致する項目を対象から外す", "Exclude matching items"))
+                new DisplayOption<bool>(true, AppLocalization.Text("対象にする", "Include")),
+                new DisplayOption<bool>(false, AppLocalization.Text("対象から外す", "Exclude"))
             };
             _selectedStringMatchMode = StringMatchModes[0];
             _selectedTargetMode = TargetModes[0];
@@ -553,6 +556,7 @@ namespace PhotoImporter.App
             OnPropertyChanged(nameof(UsesSelectedValues));
             OnPropertyChanged(nameof(IsStringInput));
             OnPropertyChanged(nameof(SelectedValuesSummary));
+            OnPropertyChanged(nameof(SuggestionButtonText));
             OnPropertyChanged(nameof(ValueType)); OnPropertyChanged(nameof(IsString));
             OnPropertyChanged(nameof(IsNumber)); OnPropertyChanged(nameof(IsDateTime));
             OnPropertyChanged(nameof(IsChoice)); OnPropertyChanged(nameof(IsTimeZoneDate));

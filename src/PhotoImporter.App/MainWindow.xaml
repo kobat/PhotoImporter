@@ -444,195 +444,233 @@
                                             <Border BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                                                     BorderThickness="0,0,0,1" Padding="0,7,0,9">
                                                 <StackPanel>
+                                                    <!-- 行1: 条件の枠組み（項目、対象/除外、Unknownの扱い、削除） -->
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="260" />
+                                                            <ColumnDefinition Width="240" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <ComboBox ItemsSource="{Binding FieldOptions}"
                                                                   DisplayMemberPath="DisplayName"
                                                                   SelectedItem="{Binding SelectedField, Mode=TwoWay}" />
-                                                        <ComboBox Grid.Column="1" Margin="8,0"
+                                                        <ComboBox Grid.Column="1" Width="150" Margin="8,0,0,0"
                                                                   ItemsSource="{Binding TargetModes}"
                                                                   DisplayMemberPath="DisplayName"
                                                                   SelectedItem="{Binding SelectedTargetMode, Mode=TwoWay}" />
-                                                        <Button Grid.Column="2" Content="削除"
+                                                        <CheckBox Grid.Column="2" Content="Unknownを含める"
+                                                                  IsChecked="{Binding IncludeUnknown}"
+                                                                  IsEnabled="{Binding CanIncludeUnknown}"
+                                                                  Margin="12,0,0,0" VerticalAlignment="Center" />
+                                                        <Button Grid.Column="4" Content="削除"
                                                                 Click="RemoveFilterCondition_Click"
                                                                 AutomationProperties.Name="このフィルター条件を削除" />
                                                     </Grid>
 
-                                                    <WrapPanel Margin="0,7,0,0">
-                                                        <Button Content="{Binding SuggestionButtonText}" Click="ShowFilterSuggestions_Click" Padding="10,3"
-                                                                AutomationProperties.AutomationId="ChooseFilterSuggestions"
-                                                                AutomationProperties.Name="{Binding SuggestionButtonText}" />
-                                                        <StackPanel Orientation="Horizontal" Margin="10,0,0,0">
-                                                            <StackPanel.Style>
-                                                                <Style TargetType="StackPanel">
-                                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                                    <Style.Triggers><DataTrigger Binding="{Binding UsesSelectedValues}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
-                                                                </Style>
-                                                            </StackPanel.Style>
-                                                            <TextBlock Text="{Binding SelectedValuesSummary}" MaxWidth="450" TextTrimming="CharacterEllipsis"
-                                                                       ToolTip="{Binding SelectedValuesSummary}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                                            <Button Content="{Binding ManualInputButtonText}" Click="UseManualFilterText_Click" Padding="10,3"
-                                                                    AutomationProperties.AutomationId="UseManualFilterText"/>
-                                                        </StackPanel>
-                                                    </WrapPanel>
+                                                    <!-- 行2: 比較する値（型別入力）と候補ボタン -->
                                                     <Grid Margin="0,7,0,0">
-                                                        <Grid.Style>
-                                                            <Style TargetType="Grid">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsString}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Grid.Style>
                                                         <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="180" />
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
-                                                        <ComboBox ItemsSource="{Binding StringMatchModes}"
-                                                                  IsEnabled="{Binding IsStringInput}"
-                                                                  DisplayMemberPath="DisplayName"
-                                                                  SelectedItem="{Binding SelectedStringMatchMode, Mode=TwoWay}" />
-                                                        <TextBox Grid.Column="1" Margin="8,0"
-                                                                 IsEnabled="{Binding IsStringInput}"
-                                                                 Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                 AutomationProperties.Name="比較する文字列" />
-                                                        <CheckBox Grid.Column="2" Content="大文字・小文字を区別"
-                                                                  IsChecked="{Binding CaseSensitive}"
-                                                                  IsEnabled="{Binding CanUseCaseSensitivity}"
-                                                                  VerticalAlignment="Center" />
+
+                                                        <Grid VerticalAlignment="Center">
+                                                            <Grid.Style>
+                                                                <Style TargetType="Grid">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding UsesSelectedValues}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Grid.Style>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="候補と完全一致:" Foreground="DimGray"
+                                                                       VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding SelectedValuesSummary}"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       ToolTip="{Binding SelectedValuesSummary}" VerticalAlignment="Center" />
+                                                            <Button Grid.Column="2" Content="{Binding ManualInputButtonText}"
+                                                                    Click="UseManualFilterText_Click" Padding="10,3" Margin="10,0,0,0"
+                                                                    AutomationProperties.AutomationId="UseManualFilterText" />
+                                                        </Grid>
+
+                                                        <Grid>
+                                                            <Grid.Style>
+                                                                <Style TargetType="Grid">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsStringInput}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Grid.Style>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="150" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <ComboBox ItemsSource="{Binding StringMatchModes}"
+                                                                      DisplayMemberPath="DisplayName"
+                                                                      SelectedItem="{Binding SelectedStringMatchMode, Mode=TwoWay}" />
+                                                            <TextBox Grid.Column="1" Margin="8,0"
+                                                                     Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                     AutomationProperties.Name="比較する文字列" />
+                                                            <CheckBox Grid.Column="2" Content="大文字・小文字を区別"
+                                                                      IsChecked="{Binding CaseSensitive}"
+                                                                      IsEnabled="{Binding CanUseCaseSensitivity}"
+                                                                      VerticalAlignment="Center" />
+                                                        </Grid>
+
+                                                        <WrapPanel VerticalAlignment="Center">
+                                                            <WrapPanel.Style>
+                                                                <Style TargetType="WrapPanel">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsNumber}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </WrapPanel.Style>
+                                                            <TextBlock Text="最小" VerticalAlignment="Center" />
+                                                            <TextBox Width="150" Margin="6,0,12,0"
+                                                                     Text="{Binding MinimumText, UpdateSourceTrigger=PropertyChanged}" />
+                                                            <TextBlock Text="最大" VerticalAlignment="Center" />
+                                                            <TextBox Width="150" Margin="6,0,12,0"
+                                                                     Text="{Binding MaximumText, UpdateSourceTrigger=PropertyChanged}" />
+                                                            <CheckBox Content="連番なし" IsChecked="{Binding IncludeNoSequence}"
+                                                                      Margin="0,0,12,0" VerticalAlignment="Center">
+                                                                <CheckBox.Style>
+                                                                    <Style TargetType="CheckBox">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsSequence}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </CheckBox.Style>
+                                                            </CheckBox>
+                                                            <CheckBox Content="Rejected" IsChecked="{Binding IncludeRejectedRating}"
+                                                                      VerticalAlignment="Center">
+                                                                <CheckBox.Style>
+                                                                    <Style TargetType="CheckBox">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsRating}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </CheckBox.Style>
+                                                            </CheckBox>
+                                                        </WrapPanel>
+
+                                                        <WrapPanel VerticalAlignment="Center">
+                                                            <WrapPanel.Style>
+                                                                <Style TargetType="WrapPanel">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsDateTime}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </WrapPanel.Style>
+                                                            <TextBlock Text="開始日" VerticalAlignment="Center" />
+                                                            <DatePicker Width="120" Margin="6,0,4,0"
+                                                                        SelectedDate="{Binding StartDate}" />
+                                                            <TextBox Width="70" Margin="0,0,10,0"
+                                                                     Text="{Binding StartTimeText, UpdateSourceTrigger=PropertyChanged}"
+                                                                     ToolTip="任意の時刻（HH:mm または HH:mm:ss）" />
+                                                            <TextBlock Text="終了日" VerticalAlignment="Center" />
+                                                            <DatePicker Width="120" Margin="6,0,4,0"
+                                                                        SelectedDate="{Binding EndDate}" />
+                                                            <TextBox Width="70" Margin="0,0,10,0"
+                                                                     Text="{Binding EndTimeText, UpdateSourceTrigger=PropertyChanged}"
+                                                                     ToolTip="任意の時刻（HH:mm または HH:mm:ss）" />
+                                                            <TextBlock Text="タイムゾーン" VerticalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsTimeZoneDate}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                            <TextBox Width="90" Margin="6,0,0,0"
+                                                                     Text="{Binding TimeZoneSpecifier, UpdateSourceTrigger=PropertyChanged}">
+                                                                <TextBox.Style>
+                                                                    <Style TargetType="TextBox">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsTimeZoneDate}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBox.Style>
+                                                            </TextBox>
+                                                        </WrapPanel>
+
+                                                        <ItemsControl ItemsSource="{Binding Choices}" VerticalAlignment="Center">
+                                                            <ItemsControl.Style>
+                                                                <Style TargetType="ItemsControl">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsChoice}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ItemsControl.Style>
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding DisplayName}"
+                                                                              IsChecked="{Binding IsSelected}"
+                                                                              Margin="0,0,14,0" VerticalAlignment="Center" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+
+                                                        <Button Grid.Column="1" Content="{Binding SuggestionButtonText}"
+                                                                Click="ShowFilterSuggestions_Click" Padding="10,3" Margin="10,0,0,0"
+                                                                VerticalAlignment="Top"
+                                                                AutomationProperties.AutomationId="ChooseFilterSuggestions"
+                                                                AutomationProperties.Name="{Binding SuggestionButtonText}" />
                                                     </Grid>
 
-                                                    <WrapPanel Margin="0,7,0,0">
-                                                        <WrapPanel.Style>
-                                                            <Style TargetType="WrapPanel">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsNumber}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </WrapPanel.Style>
-                                                        <TextBlock Text="最小" VerticalAlignment="Center" />
-                                                        <TextBox Width="150" Margin="6,0,12,0"
-                                                                 Text="{Binding MinimumText, UpdateSourceTrigger=PropertyChanged}" />
-                                                        <TextBlock Text="最大" VerticalAlignment="Center" />
-                                                        <TextBox Width="150" Margin="6,0,12,0"
-                                                                 Text="{Binding MaximumText, UpdateSourceTrigger=PropertyChanged}" />
-                                                        <CheckBox Content="連番なし" IsChecked="{Binding IncludeNoSequence}"
-                                                                  Margin="0,0,12,0">
-                                                            <CheckBox.Style>
-                                                                <Style TargetType="CheckBox">
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsSequence}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Visible" />
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </CheckBox.Style>
-                                                        </CheckBox>
-                                                        <CheckBox Content="Rejected" IsChecked="{Binding IncludeRejectedRating}">
-                                                            <CheckBox.Style>
-                                                                <Style TargetType="CheckBox">
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsRating}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Visible" />
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </CheckBox.Style>
-                                                        </CheckBox>
-                                                    </WrapPanel>
-
-                                                    <WrapPanel Margin="0,7,0,0">
-                                                        <WrapPanel.Style>
-                                                            <Style TargetType="WrapPanel">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsDateTime}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </WrapPanel.Style>
-                                                        <TextBlock Text="開始日" VerticalAlignment="Center" />
-                                                        <DatePicker Width="125" Margin="6,0,4,0"
-                                                                    SelectedDate="{Binding StartDate}" />
-                                                        <TextBox Width="75" Margin="0,0,10,0"
-                                                                 Text="{Binding StartTimeText, UpdateSourceTrigger=PropertyChanged}"
-                                                                 ToolTip="任意の時刻（HH:mm または HH:mm:ss）" />
-                                                        <TextBlock Text="終了日" VerticalAlignment="Center" />
-                                                        <DatePicker Width="125" Margin="6,0,4,0"
-                                                                    SelectedDate="{Binding EndDate}" />
-                                                        <TextBox Width="75" Margin="0,0,10,0"
-                                                                 Text="{Binding EndTimeText, UpdateSourceTrigger=PropertyChanged}"
-                                                                 ToolTip="任意の時刻（HH:mm または HH:mm:ss）" />
-                                                        <TextBlock Text="タイムゾーン" VerticalAlignment="Center">
-                                                            <TextBlock.Style>
-                                                                <Style TargetType="TextBlock">
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsTimeZoneDate}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Visible" />
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </TextBlock.Style>
-                                                        </TextBlock>
-                                                        <TextBox Width="95" Margin="6,0,0,0"
-                                                                 Text="{Binding TimeZoneSpecifier, UpdateSourceTrigger=PropertyChanged}">
-                                                            <TextBox.Style>
-                                                                <Style TargetType="TextBox">
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsTimeZoneDate}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Visible" />
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </TextBox.Style>
-                                                        </TextBox>
-                                                    </WrapPanel>
-
-                                                    <ItemsControl ItemsSource="{Binding Choices}" Margin="0,7,0,0">
-                                                        <ItemsControl.Style>
-                                                            <Style TargetType="ItemsControl">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsChoice}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </ItemsControl.Style>
-                                                        <ItemsControl.ItemsPanel>
-                                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                                        </ItemsControl.ItemsPanel>
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate>
-                                                                <CheckBox Content="{Binding DisplayName}"
-                                                                          IsChecked="{Binding IsSelected}"
-                                                                          Margin="0,0,14,3" />
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-
-                                                    <CheckBox Content="Unknownを含める"
-                                                              IsChecked="{Binding IncludeUnknown}"
-                                                              IsEnabled="{Binding CanIncludeUnknown}"
-                                                              Margin="0,7,0,0" />
                                                     <TextBlock Text="{Binding ValidationMessage}"
                                                                Foreground="Firebrick"
-                                                               Margin="0,4,0,0" TextWrapping="Wrap" />
+                                                               Margin="0,4,0,0" TextWrapping="Wrap">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding ValidationMessage}" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding ValidationMessage}" Value="{x:Null}">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                 </StackPanel>
                                             </Border>
                                         </DataTemplate>
