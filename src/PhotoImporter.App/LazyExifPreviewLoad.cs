@@ -85,7 +85,8 @@ namespace PhotoImporter.App
             string exifCacheRoot,
             IProgress<PhotoMetadataScanProgress> progress,
             CancellationToken cancellationToken,
-            CachedPhotoMetadataScanner scanner = null)
+            CachedPhotoMetadataScanner scanner = null,
+            Func<int, bool> confirmFileReads = null)
         {
             ValidateTargets(cancellationToken);
 
@@ -127,7 +128,8 @@ namespace PhotoImporter.App
                 cacheStore,
                 DateTime.UtcNow,
                 progress,
-                cancellationToken);
+                cancellationToken,
+                confirmFileReads);
             cancellationToken.ThrowIfCancellationRequested();
             ValidateTargets(cancellationToken);
             warnings.AddRange(scan.Warnings);

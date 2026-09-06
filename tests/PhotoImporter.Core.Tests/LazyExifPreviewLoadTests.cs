@@ -29,6 +29,23 @@ namespace PhotoImporter.Core.Tests
         }
 
         [Fact]
+        public void DecliningPhysicalReadLeavesMetadataAndCopyPlanUntouched()
+        {
+            var item = CreateItem(CreateFile("photo.jpg", "original"), 3);
+            item.IsSelected = false;
+            var copyPlan = item.CopyPlan;
+            var reader = new CallbackMetadataReader(_ => PhotoMetadataReadResult.NoMetadata());
+            var plan = LazyExifPreviewLoadPlan.Capture(_source, _destination, new[] { item }, RawJpegAnalysisMode.AnalyzeBoth);
+            Assert.Throws<OperationCanceledException>(() => plan.Load(false, Path.Combine(_root, "cache"),
+                null, CancellationToken.None, new CachedPhotoMetadataScanner(reader), count => false));
+            Assert.Empty(reader.Paths);
+            Assert.Null(item.MetadataResult);
+            Assert.Same(copyPlan, item.CopyPlan);
+            Assert.False(item.IsSelected);
+            Assert.Equal(3, item.SequenceNumber);
+        }
+
+        [Fact]
         public void Load_UsesFixedTargetSetAndCommitPreservesCopyPlanAndSelection()
         {
             var path = CreateFile("original.jpg", "original");

@@ -25,23 +25,40 @@ namespace PhotoImporter.Core.Tests
         [InlineData("numbers")]
         [InlineData("unread")]
         [InlineData("from-file")]
+        [InlineData("choice-filetype")]
+        [InlineData("choice-copy")]
+        [InlineData("choice-exif")]
+        [InlineData("choice-protected")]
+        [InlineData("choice-gps")]
         public void PickerLoadsSearchesAndCommitsWithoutFilesystemReads(string scenario)
         {
             Exception failure = null;
+            var stage = "starting STA thread";
             var thread = new Thread(() =>
             {
                 FilterSuggestionWindow window = null;
                 try
                 {
+                    stage = "creating editor";
                     var fields = FilterFieldOption.CreateAll();
                     var field = scenario.StartsWith("dates", StringComparison.Ordinal) ? FilterField.ModifiedDate : scenario == "numbers" ? FilterField.FileSize :
                         scenario == "unread" ? FilterField.CameraModel : FilterField.Extension;
+                    switch (scenario)
+                    {
+                        case "choice-filetype": field = FilterField.FileType; break;
+                        case "choice-copy": field = FilterField.CopyStatus; break;
+                        case "choice-exif": field = FilterField.ExifReadStatus; break;
+                        case "choice-protected": field = FilterField.Protected; break;
+                        case "choice-gps": field = FilterField.HasGps; break;
+                    }
                     var editor = new FilterConditionEditor(fields) { SelectedField = fields.Single(item => item.Field == field) };
+                    if (editor.IsChoice) editor.Choices.Last().IsSelected = true;
                     var catalog = new FilterSuggestionCatalog(new[]
                     {
                         new FilterCandidate("a.jpg", new DateTime(2026, 9, 5, 12, 0, 0), 100, "", false, null, FilterCopyStatus.NotImported),
                         new FilterCandidate("b.nef", new DateTime(2026, 9, 6, 13, 0, 0), 200, "", false, null, FilterCopyStatus.NotImported)
                     });
+                    stage = "creating window";
                     window = new FilterSuggestionWindow(editor, () => Task.FromResult(catalog), true, scenario == "from-file")
                     {
                         WindowStartupLocation = WindowStartupLocation.Manual,
@@ -52,12 +69,32 @@ namespace PhotoImporter.Core.Tests
                     {
                         try
                         {
+                            stage = "waiting for candidates";
                             var status = Control<TextBlock>(current, "StatusText");
                             await Until(() => status.Text.Contains("候補 /"));
                             var list = Control<ListBox>(current, "ValuesList");
-                            await Until(() => scenario == "unread" || list.Items.Count == 2);
+                            await Until(() => scenario == "unread" || list.Items.Count == (editor.IsChoice ? editor.Choices.Count : 2));
+                            stage = "interacting with candidates";
                             Assert.Equal(scenario == "from-file", Control<ComboBox>(current, "FieldBox").IsEnabled);
                             Capture(current, scenario);
+                            if (editor.IsChoice)
+                            {
+                                var rows = list.Items.Cast<object>().ToArray();
+                                Assert.All(rows, row => Assert.True((bool)row.GetType().GetProperty("IsMultiple").GetValue(row)));
+                                Assert.Single(rows, row => (bool)row.GetType().GetProperty("IsSelected").GetValue(row));
+                                foreach (var row in rows) row.GetType().GetProperty("IsSelected").SetValue(row, false);
+                                Assert.False(Control<Button>(current, "UseButton").IsEnabled);
+                                rows[0].GetType().GetProperty("IsSelected").SetValue(rows[0], true);
+                                Control<TextBox>(current, "SearchBox").Text = rows[1].GetType().GetProperty("Label").GetValue(rows[1]).ToString();
+                                await Until(() => list.Items.Count == 1);
+                                Assert.True(Control<Button>(current, "UseButton").IsEnabled);
+                                list.Items[0].GetType().GetProperty("IsSelected").SetValue(list.Items[0], true);
+                                Control<TextBox>(current, "SearchBox").Clear();
+                                await Until(() => list.Items.Count == rows.Length);
+                                Assert.Equal(2, list.Items.Cast<object>().Count(row => (bool)row.GetType().GetProperty("IsSelected").GetValue(row)));
+                                Click(current, "UseButton");
+                                return;
+                            }
                             if (scenario == "unread")
                             {
                                 Assert.Contains("Exif未読 2件", status.Text);
@@ -99,8 +136,10 @@ namespace PhotoImporter.Core.Tests
                             Click(current, "UseButton");
                         }
                         catch (Exception ex) { failure = ex; current.Close(); }
-                    }), DispatcherPriority.ApplicationIdle);
+                    }), DispatcherPriority.Background);
+                    stage = "showing dialog";
                     var result = window.ShowDialog();
+                    stage = "checking result";
                     if (failure != null) return;
                     if (scenario == "unread") { Assert.True(window.RequestsExif); Assert.False(result); }
                     else
@@ -115,16 +154,24 @@ namespace PhotoImporter.Core.Tests
                             Assert.Empty(editor.EndTimeText);
                         }
                         else if (scenario == "numbers") { Assert.Equal("200", editor.MinimumText); Assert.Empty(editor.MaximumText); }
+                        else if (editor.IsChoice) Assert.Equal(2, editor.Choices.Count(choice => choice.IsSelected));
                         else Assert.Equal(2, editor.SelectedValues.Count);
                     }
                 }
                 catch (Exception ex) { failure = ex; }
-                finally { window?.Close(); Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+                finally
+                {
+                    stage = "closing window";
+                    window?.Close();
+                    stage = "shutting down dispatcher";
+                    Dispatcher.CurrentDispatcher.InvokeShutdown();
+                    stage = "finished";
+                }
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.IsBackground = true;
             thread.Start();
-            Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "Picker test timed out.");
+            Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "Picker test timed out: " + stage);
             if (failure != null) throw new Xunit.Sdk.XunitException(failure.ToString());
         }
 

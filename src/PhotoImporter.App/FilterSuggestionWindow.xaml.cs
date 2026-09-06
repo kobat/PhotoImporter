@@ -37,7 +37,7 @@ namespace PhotoImporter.App
             _fromFile = chooseField;
             InitializeComponent();
             WpfLocalizer.Localize(this);
-            FieldBox.ItemsSource = editor.FieldOptions;
+            FieldBox.ItemsSource = editor.GroupedFieldOptions;
             FieldBox.SelectedItem = editor.SelectedField;
             FieldBox.IsEnabled = chooseField;
             _searchTimer.Tick += async (sender, args) => { _searchTimer.Stop(); await SearchAsync(); };
@@ -73,8 +73,10 @@ namespace PhotoImporter.App
             var field = _editor.SelectedField.Field;
             var zone = _editor.IsTimeZoneDate ? _editor.TimeZoneSpecifier : null;
             var exact = ExactTimeBox.IsChecked == true;
-            var multiple = _editor.IsString;
-            var selected = new HashSet<string>(_editor.SelectedValues, StringComparer.Ordinal);
+            var multiple = _editor.IsString || _editor.IsChoice;
+            var selected = new HashSet<object>(_editor.IsString
+                ? _editor.SelectedValues.Cast<object>()
+                : _editor.Choices.Where(choice => choice.IsSelected).Select(choice => choice.Value));
             var names = _editor.Choices.ToDictionary(choice => choice.Value, choice => choice.DisplayName);
             try
             {
@@ -84,11 +86,11 @@ namespace PhotoImporter.App
                 {
                     var list = result.Values.Select(value => new SuggestionRow(value.Value,
                         FormatValue(value.Value, names, exact, field), value.Count, multiple,
-                        value.Value is string && selected.Contains((string)value.Value))).ToList();
+                        selected.Contains(value.Value))).ToList();
                     var present = new HashSet<object>(list.Select(row => row.Value));
                     foreach (var choice in names.Where(choice => !_fromFile && !present.Contains(choice.Key)))
-                        list.Add(new SuggestionRow(choice.Key, choice.Value, 0, false, false));
-                    foreach (var value in selected.Where(value => !present.Contains(value)))
+                        list.Add(new SuggestionRow(choice.Key, choice.Value, 0, multiple, selected.Contains(choice.Key)));
+                    foreach (var value in selected.OfType<string>().Where(value => !present.Contains(value)))
                         list.Add(new SuggestionRow(value, value, 0, true, true));
                     return list.ToArray();
                 }, token);
@@ -165,11 +167,17 @@ namespace PhotoImporter.App
         private void Value_Changed(object sender, SelectionChangedEventArgs e) => UpdateUseButton();
         private void UpdateUseButton()
         {
-            if (UseButton != null) UseButton.IsEnabled = !_loading && (_editor.IsString ? _rows.Any(row => row.IsSelected) : ValuesList.SelectedItem != null);
+            if (UseButton != null) UseButton.IsEnabled = !_loading && (_editor.IsString || _editor.IsChoice ? _rows.Any(row => row.IsSelected) : ValuesList.SelectedItem != null);
         }
         private void Use_Click(object sender, RoutedEventArgs e)
         {
+            if (!UseButton.IsEnabled) return;
             if (_editor.IsString) _editor.SetSelectedValues(_rows.Where(row => row.IsSelected).Select(row => (string)row.Value));
+            else if (_editor.IsChoice)
+            {
+                var selected = new HashSet<object>(_rows.Where(row => row.IsSelected).Select(row => row.Value));
+                foreach (var choice in _editor.Choices) choice.IsSelected = selected.Contains(choice.Value);
+            }
             else
             {
                 var row = ValuesList.SelectedItem as SuggestionRow;

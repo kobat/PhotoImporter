@@ -5,14 +5,26 @@
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}">
-    <Window.Resources><BooleanToVisibilityConverter x:Key="BoolVisibility" /></Window.Resources>
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="FilterStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+        </ResourceDictionary>
+    </Window.Resources>
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <ComboBox x:Name="FieldBox" DisplayMemberPath="DisplayName" SelectionChanged="Field_Changed"
-                  AutomationProperties.Name="条件の項目" />
+                  IsSynchronizedWithCurrentItem="False" MaxDropDownHeight="420"
+                  AutomationProperties.Name="条件の項目">
+            <ComboBox.GroupStyle>
+                <StaticResource ResourceKey="FilterFieldGroupStyle" />
+            </ComboBox.GroupStyle>
+        </ComboBox>
         <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,10" TextWrapping="Wrap" />
         <DockPanel Grid.Row="2" Margin="0,0,0,10">
             <TextBlock Text="候補を検索" VerticalAlignment="Center" Margin="0,0,8,0"/>

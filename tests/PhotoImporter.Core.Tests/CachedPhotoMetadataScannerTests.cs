@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using PhotoImporter.Core.Metadata;
 using Xunit;
 
@@ -12,6 +13,108 @@ namespace PhotoImporter.Core.Tests
     {
         private readonly string _root = Path.Combine(
             Path.GetTempPath(), "PhotoImporter.Tests", Guid.NewGuid().ToString("N"));
+
+        [Fact]
+        public void ConfirmationCountsOnlyMissesAndRunsBeforeAnyPhysicalRead()
+        {
+            var cached = CreateFile("cached.jpg", "cached");
+            var raw = CreateFile("pair.arw", "raw");
+            var jpeg = CreateFile("pair.jpg", "jpeg");
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"));
+            var volume = CreateVolume();
+            var reader = new StubReader(_ => PhotoMetadataReadResult.NoMetadata());
+            var scanner = new CachedPhotoMetadataScanner(reader);
+            scanner.Scan(RawJpegAnalysisPlan.Create(new[] { cached }), volume, store, UtcNow());
+            var confirmations = 0;
+            var plan = RawJpegAnalysisPlan.Create(new[] { cached, raw, jpeg });
+            var result = scanner.Scan(plan, volume, store, UtcNow(), confirmFileReads: count =>
+            {
+                confirmations++;
+                Assert.Equal(1, count);
+                Assert.Equal(1, reader.ReadCount);
+                return true;
+            });
+            Assert.Equal(1, confirmations);
+            Assert.Equal(2, reader.ReadCount);
+            Assert.Equal(1, result.CacheHits);
+            scanner.Scan(plan, volume, store, UtcNow(), confirmFileReads: _ =>
+                throw new Exception("All cache hits must skip confirmation."));
+            Assert.Equal(2, reader.ReadCount);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void DecliningConfirmationDoesNotReadAnyFile(bool useCache)
+        {
+            var first = CreateFile("first.jpg", "first");
+            var second = CreateFile("second.jpg", "second");
+            var reader = new StubReader(_ => PhotoMetadataReadResult.NoMetadata());
+            var confirmations = 0;
+            Assert.Throws<OperationCanceledException>(() => new CachedPhotoMetadataScanner(reader).Scan(
+                RawJpegAnalysisPlan.Create(new[] { first, second }), CreateVolume(),
+                useCache ? new ExifCacheStore(Path.Combine(_root, "cache")) : null, UtcNow(),
+                confirmFileReads: count => { confirmations++; Assert.Equal(2, count); return false; }));
+            Assert.Equal(1, confirmations);
+            Assert.Equal(0, reader.ReadCount);
+        }
+
+        [Fact]
+        public void ConfirmationReleasesCacheLockAndRetainsHitsIfCacheBecomesUnavailable()
+        {
+            var cached = CreateFile("cached.jpg", "cached");
+            var missing = CreateFile("missing.jpg", "missing");
+            var store = new ExifCacheStore(Path.Combine(_root, "cache"), TimeSpan.Zero);
+            var volume = CreateVolume();
+            var reader = new StubReader(_ => PhotoMetadataReadResult.NoMetadata());
+            var scanner = new CachedPhotoMetadataScanner(reader);
+            scanner.Scan(RawJpegAnalysisPlan.Create(new[] { cached }), volume, store, UtcNow());
+            var result = scanner.Scan(RawJpegAnalysisPlan.Create(new[] { cached, missing }), volume, store, UtcNow(),
+                confirmFileReads: count =>
+                {
+                    Assert.Equal(1, count);
+                    Task.Run(() =>
+                    {
+                        ExifCacheSession session;
+                        string warning;
+                        Assert.True(store.TryOpen(volume, out session, out warning), warning);
+                        session.Dispose();
+                    }).GetAwaiter().GetResult();
+                    // Only this test's private cache is removed to simulate cache loss while waiting.
+                    Directory.Delete(store.CacheRoot, true);
+                    File.WriteAllText(store.CacheRoot, "unavailable");
+                    return true;
+                });
+            Assert.Equal(1, result.CacheHits);
+            Assert.Equal(2, reader.ReadCount);
+            Assert.Equal(2, result.Results.Count);
+            Assert.NotEmpty(result.Warnings);
+        }
+
+        [Fact]
+        public void UnsupportedExtensionDoesNotRequireConfirmationOrPhysicalReading()
+        {
+            var file = CreateFile("notes.txt", "notes");
+            var reader = new StubReader(_ => throw new Exception("File contents must not be read."));
+            var result = new CachedPhotoMetadataScanner(reader).Scan(
+                RawJpegAnalysisPlan.Create(new[] { file }), null, null, UtcNow(),
+                confirmFileReads: _ => throw new Exception("No physical reads require confirmation."));
+            Assert.Equal(PhotoMetadataReadStatus.Unsupported, result.Results[file].Status);
+            Assert.Equal(0, reader.ReadCount);
+        }
+
+        [Fact]
+        public void CancellationDuringConfirmationDoesNotReadAnyFile()
+        {
+            var photo = CreateFile("photo.jpg", "data");
+            var reader = new StubReader(_ => PhotoMetadataReadResult.NoMetadata());
+            using (var cancellation = new CancellationTokenSource())
+                Assert.Throws<OperationCanceledException>(() => new CachedPhotoMetadataScanner(reader).Scan(
+                    RawJpegAnalysisPlan.Create(new[] { photo }), null, null, UtcNow(),
+                    cancellationToken: cancellation.Token,
+                    confirmFileReads: _ => { cancellation.Cancel(); return true; }));
+            Assert.Equal(0, reader.ReadCount);
+        }
 
         [Fact]
         public void SecondScanUsesCachedMetadataWithoutReadingFileAgain()

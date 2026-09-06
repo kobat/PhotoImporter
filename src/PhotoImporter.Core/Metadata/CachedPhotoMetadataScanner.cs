@@ -68,7 +68,8 @@ namespace PhotoImporter.Core.Metadata
             ExifCacheStore cacheStore,
             DateTime utcNow,
             IProgress<PhotoMetadataScanProgress> progress = null,
-            CancellationToken cancellationToken = default(CancellationToken))
+            CancellationToken cancellationToken = default(CancellationToken),
+            Func<int, bool> confirmFileReads = null)
         {
             if (analysisPlan == null) throw new ArgumentNullException(nameof(analysisPlan));
             if (cacheStore != null && volume == null) throw new ArgumentNullException(nameof(volume));
@@ -115,6 +116,56 @@ namespace PhotoImporter.Core.Metadata
             progressReporter.ReportReading(0, 0, true);
             try
             {
+                // Resolve and retain every cache hit before requesting permission to read files.
+                // Do not query the cache again after confirmation: the approved miss set is fixed.
+                var keys = new Dictionary<string, ExifCacheKey>(StringComparer.OrdinalIgnoreCase);
+                var filesToRead = 0;
+                foreach (var source in analysisPlan.AnalysisSources)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (results.ContainsKey(source)) continue;
+                    var snapshot = snapshots[source];
+                    var key = cacheSession == null ? null
+                        : ExifCacheKey.Create(volume, source, snapshot.FileSize, snapshot.LastWriteTimeUtc);
+                    keys.Add(source, key);
+                    PhotoMetadataReadResult cached;
+                    if (cacheSession != null && cacheSession.TryGet(key, utcNow, out cached))
+                    {
+                        results.Add(source, cached);
+                        cacheHits++;
+                    }
+                    else if (!PhotoFileClassifier.IsSupported(source))
+                    {
+                        // Unsupported extensions can be classified without opening file contents.
+                        var unsupported = PhotoMetadataReadResult.Unsupported();
+                        results.Add(source, unsupported);
+                        if (cacheSession != null) cacheSession.Put(key, unsupported, utcNow);
+                    }
+                    else filesToRead++;
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (filesToRead > 0 && confirmFileReads != null)
+                {
+                    // A user may leave the dialog open. Release the cross-process cache mutex
+                    // while waiting, retaining resolved values and keys in this scan.
+                    var reopenCache = cacheSession != null;
+                    if (cacheSession != null)
+                    {
+                        DisposeCacheSession(cacheSession, cacheStore, warnings);
+                        cacheSession = null;
+                    }
+                    if (!confirmFileReads(filesToRead))
+                        throw new OperationCanceledException("Exif file reading was declined.", cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (reopenCache)
+                    {
+                        string warning;
+                        if (!cacheStore.TryOpen(volume, out cacheSession, out warning, cancellationToken) &&
+                            !string.IsNullOrWhiteSpace(warning)) warnings.Add(warning);
+                    }
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+
                 foreach (var source in analysisPlan.AnalysisSources)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -127,35 +178,25 @@ namespace PhotoImporter.Core.Metadata
                     }
 
                     var before = snapshots[source];
-                    var key = cacheSession == null
-                        ? null
-                        : ExifCacheKey.Create(volume, source, before.FileSize, before.LastWriteTimeUtc);
-                    PhotoMetadataReadResult result;
-                    if (cacheSession != null && cacheSession.TryGet(key, utcNow, out result))
+                    var key = keys[source];
+                    var result = _reader.Read(source);
+                    try
                     {
-                        cacheHits++;
-                    }
-                    else
-                    {
-                        result = _reader.Read(source);
-                        try
-                        {
-                            var after = TakeSnapshot(source);
-                            if (!SnapshotsMatch(before, after))
-                            {
-                                result = PhotoMetadataReadResult.ReadError(new IOException(
-                                    "Exif の読み取り中にファイルが変更されました。もう一度スキャンしてください。"));
-                            }
-                            else
-                            {
-                                if (cacheSession != null) cacheSession.Put(key, result, utcNow);
-                            }
-                        }
-                        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                        var after = TakeSnapshot(source);
+                        if (!SnapshotsMatch(before, after))
                         {
                             result = PhotoMetadataReadResult.ReadError(new IOException(
-                                "Exif の読み取り中にファイルの状態を再確認できませんでした。", ex));
+                                "Exif の読み取り中にファイルが変更されました。もう一度スキャンしてください。"));
                         }
+                        else
+                        {
+                            if (cacheSession != null) cacheSession.Put(key, result, utcNow);
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                    {
+                        result = PhotoMetadataReadResult.ReadError(new IOException(
+                            "Exif の読み取り中にファイルの状態を再確認できませんでした。", ex));
                     }
 
                     results.Add(source, result);
@@ -173,17 +214,7 @@ namespace PhotoImporter.Core.Metadata
                         PhotoMetadataScanPhase.SavingCache,
                         completed,
                         cacheHits);
-                    try
-                    {
-                        cacheSession.Dispose();
-                    }
-                    catch (Exception ex) when (ExifCacheStore.IsCacheFailure(ex))
-                    {
-                        warnings.Add(string.Format(
-                            "Exif キャッシュを保存できませんでした ({0}): {1} 次回は再解析します。",
-                            cacheStore.CacheRoot,
-                            ex.Message));
-                    }
+                    DisposeCacheSession(cacheSession, cacheStore, warnings);
                 }
             }
 
@@ -194,6 +225,17 @@ namespace PhotoImporter.Core.Metadata
                     cacheHits);
 
             return new PhotoMetadataScanResult(results, warnings, cacheHits);
+        }
+
+        private static void DisposeCacheSession(ExifCacheSession session, ExifCacheStore store, IList<string> warnings)
+        {
+            try { session.Dispose(); }
+            catch (Exception ex) when (ExifCacheStore.IsCacheFailure(ex))
+            {
+                warnings.Add(string.Format(
+                    "Exif キャッシュを保存できませんでした ({0}): {1} 次回は再解析します。",
+                    store.CacheRoot, ex.Message));
+            }
         }
 
         private sealed class MetadataProgressReporter

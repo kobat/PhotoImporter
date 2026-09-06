@@ -7,6 +7,10 @@
         WindowStartupLocation="CenterScreen"
         KeyDown="MainWindow_KeyDown">
     <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="FilterStyles.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <Style x:Key="CopyTargetCheckBoxStyle" TargetType="CheckBox">
             <Setter Property="IsEnabled" Value="{Binding CanCopy}" />
             <Setter Property="HorizontalAlignment" Value="Center" />
@@ -104,6 +108,7 @@
                 </Grid>
             </Border>
         </DataTemplate>
+        </ResourceDictionary>
     </Window.Resources>
     <Grid Margin="20">
         <Grid.ColumnDefinitions>
@@ -435,7 +440,7 @@
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
                                       IsEnabled="{Binding CanEditFilters}">
-                            <StackPanel>
+                            <StackPanel Margin="0,0,12,0">
                                 <TextBlock Text="すべての条件に一致する項目を表示します。"
                                            Foreground="DimGray" Margin="0,0,0,4" />
                                 <ItemsControl ItemsSource="{Binding FilterConditions}">
@@ -445,29 +450,30 @@
                                                     BorderThickness="0,0,0,1" Padding="0,7,0,9">
                                                 <StackPanel>
                                                     <!-- 行1: 条件の枠組み（項目、対象/除外、Unknownの扱い、削除） -->
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="240" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <ComboBox ItemsSource="{Binding FieldOptions}"
+                                                    <DockPanel>
+                                                        <Button DockPanel.Dock="Right" Content="削除" Margin="12,0,0,0"
+                                                                VerticalAlignment="Top"
+                                                                Click="RemoveFilterCondition_Click"
+                                                                AutomationProperties.Name="このフィルター条件を削除" />
+                                                        <WrapPanel>
+                                                        <ComboBox Width="240" ItemsSource="{Binding GroupedFieldOptions}"
+                                                                  IsSynchronizedWithCurrentItem="False" MaxDropDownHeight="420"
                                                                   DisplayMemberPath="DisplayName"
-                                                                  SelectedItem="{Binding SelectedField, Mode=TwoWay}" />
-                                                        <ComboBox Grid.Column="1" Width="150" Margin="8,0,0,0"
+                                                                  SelectedItem="{Binding SelectedField, Mode=TwoWay}">
+                                                            <ComboBox.GroupStyle>
+                                                                <StaticResource ResourceKey="FilterFieldGroupStyle" />
+                                                            </ComboBox.GroupStyle>
+                                                        </ComboBox>
+                                                        <ComboBox Width="150" Margin="8,0,0,0"
                                                                   ItemsSource="{Binding TargetModes}"
                                                                   DisplayMemberPath="DisplayName"
                                                                   SelectedItem="{Binding SelectedTargetMode, Mode=TwoWay}" />
-                                                        <CheckBox Grid.Column="2" Content="Unknownを含める"
+                                                        <CheckBox Content="Unknownを含める"
                                                                   IsChecked="{Binding IncludeUnknown}"
                                                                   IsEnabled="{Binding CanIncludeUnknown}"
-                                                                  Margin="12,0,0,0" VerticalAlignment="Center" />
-                                                        <Button Grid.Column="4" Content="削除"
-                                                                Click="RemoveFilterCondition_Click"
-                                                                AutomationProperties.Name="このフィルター条件を削除" />
-                                                    </Grid>
+                                                                  Margin="12,3,0,3" VerticalAlignment="Center" />
+                                                        </WrapPanel>
+                                                    </DockPanel>
 
                                                     <!-- 行2: 比較する値（型別入力）と候補ボタン -->
                                                     <Grid Margin="0,7,0,0">

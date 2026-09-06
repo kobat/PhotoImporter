@@ -1843,7 +1843,15 @@ namespace PhotoImporter.App
                     UseExifCache,
                     ExifCacheRoot,
                     progress,
-                    token), token);
+                    token,
+                    confirmFileReads: count => Dispatcher.Invoke(() =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var dialog = new ExifReadConfirmationWindow(count) { Owner = this };
+                        if (dialog.ShowDialog() == true) return true;
+                        scanCancellation.Cancel();
+                        return false;
+                    })), token);
 
                 var commit = loadResult.PrepareCommit(Items, prepared);
                 commit.Apply();

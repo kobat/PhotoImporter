@@ -7,6 +7,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Windows.Data;
 
 namespace PhotoImporter.App
 {
@@ -32,6 +33,9 @@ namespace PhotoImporter.App
 
         public FilterField Field { get; }
         public string DisplayName { get; }
+        public string ExifGroup => FilterFieldDefinition.Get(Field).RequiresExif
+            ? AppLocalization.Text("Exif読込が必要", "Exif reading required")
+            : AppLocalization.Text("Exif読込不要", "No Exif reading required");
 
         public static IReadOnlyList<FilterFieldOption> CreateAll() => new[]
         {
@@ -195,6 +199,8 @@ namespace PhotoImporter.App
         public FilterConditionEditor(IReadOnlyList<FilterFieldOption> fieldOptions)
         {
             _fieldOptions = fieldOptions ?? throw new ArgumentNullException(nameof(fieldOptions));
+            GroupedFieldOptions = new ListCollectionView(fieldOptions.ToList());
+            GroupedFieldOptions.GroupDescriptions.Add(new PropertyGroupDescription(nameof(FilterFieldOption.ExifGroup)));
             StringMatchModes = new[]
             {
                 new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Exact, AppLocalization.Text("完全一致", "Exact match")),
@@ -214,6 +220,7 @@ namespace PhotoImporter.App
 
         public event PropertyChangedEventHandler PropertyChanged;
         public IReadOnlyList<FilterFieldOption> FieldOptions => _fieldOptions;
+        public ListCollectionView GroupedFieldOptions { get; }
         public IReadOnlyList<DisplayOption<StringFilterMatchMode>> StringMatchModes { get; }
         public IReadOnlyList<DisplayOption<bool>> TargetModes { get; }
         public ObservableCollection<FilterChoiceOption> Choices { get; } = new ObservableCollection<FilterChoiceOption>();
