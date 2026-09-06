@@ -23,6 +23,12 @@ namespace PhotoImporter.App
         public string DisplayName { get; }
     }
 
+    public enum FilterFieldCategory
+    {
+        FileSystem,
+        Exif
+    }
+
     public sealed class FilterFieldOption
     {
         public FilterFieldOption(FilterField field, string displayName)
@@ -33,9 +39,12 @@ namespace PhotoImporter.App
 
         public FilterField Field { get; }
         public string DisplayName { get; }
-        public string ExifGroup => FilterFieldDefinition.Get(Field).RequiresExif
-            ? AppLocalization.Text("Exif読込が必要", "Exif reading required")
-            : AppLocalization.Text("Exif読込不要", "No Exif reading required");
+        public FilterFieldCategory Category => FilterFieldDefinition.Get(Field).RequiresExif
+            ? FilterFieldCategory.Exif
+            : FilterFieldCategory.FileSystem;
+        public string CategoryName => Category == FilterFieldCategory.Exif
+            ? AppLocalization.Text("Exif系", "Exif")
+            : AppLocalization.Text("ファイルシステム系", "File system");
 
         public static IReadOnlyList<FilterFieldOption> CreateAll() => new[]
         {
@@ -200,7 +209,7 @@ namespace PhotoImporter.App
         {
             _fieldOptions = fieldOptions ?? throw new ArgumentNullException(nameof(fieldOptions));
             GroupedFieldOptions = new ListCollectionView(fieldOptions.ToList());
-            GroupedFieldOptions.GroupDescriptions.Add(new PropertyGroupDescription(nameof(FilterFieldOption.ExifGroup)));
+            GroupedFieldOptions.GroupDescriptions.Add(new PropertyGroupDescription(nameof(FilterFieldOption.CategoryName)));
             StringMatchModes = new[]
             {
                 new DisplayOption<StringFilterMatchMode>(StringFilterMatchMode.Exact, AppLocalization.Text("完全一致", "Exact match")),

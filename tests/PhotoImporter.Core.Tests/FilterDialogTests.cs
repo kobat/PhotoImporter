@@ -17,7 +17,7 @@ namespace PhotoImporter.Core.Tests
     public sealed class FilterDialogTests
     {
         [Fact]
-        public void GroupsFollowExifRequirementAndPickersKeepIndependentSelections()
+        public void GroupsMatchTokenDetailCategoriesAndPickersKeepIndependentSelections()
         {
             RunSta(() =>
             {
@@ -25,10 +25,17 @@ namespace PhotoImporter.Core.Tests
                 var first = new FilterConditionEditor(fields);
                 var second = new FilterConditionEditor(fields);
                 var groups = first.GroupedFieldOptions.Groups.Cast<CollectionViewGroup>().ToArray();
-                Assert.Equal(new[] { "Exif読込不要", "Exif読込が必要" }, groups.Select(group => group.Name));
-                Assert.All(groups[0].Items.Cast<FilterFieldOption>(), field => Assert.False(FilterFieldDefinition.Get(field.Field).RequiresExif));
-                Assert.All(groups[1].Items.Cast<FilterFieldOption>(), field => Assert.True(FilterFieldDefinition.Get(field.Field).RequiresExif));
-                Assert.Contains(groups[1].Items.Cast<FilterFieldOption>(), field => field.Field == FilterField.ExifReadStatus);
+                Assert.Equal(new[] { "ファイルシステム系", "Exif系" }, groups.Select(group => group.Name));
+                var fileSystemFields = groups[0].Items.Cast<FilterFieldOption>().ToArray();
+                var exifFields = groups[1].Items.Cast<FilterFieldOption>().ToArray();
+                Assert.All(fileSystemFields, field => Assert.Equal(FilterFieldCategory.FileSystem, field.Category));
+                Assert.All(fileSystemFields, field => Assert.False(FilterFieldDefinition.Get(field.Field).RequiresExif));
+                Assert.All(exifFields, field => Assert.Equal(FilterFieldCategory.Exif, field.Category));
+                Assert.All(exifFields, field => Assert.True(FilterFieldDefinition.Get(field.Field).RequiresExif));
+                Assert.Equal(
+                    new[] { FilterField.FileType, FilterField.Extension, FilterField.CopyStatus },
+                    fileSystemFields.Take(3).Select(field => field.Field));
+                Assert.Equal(FilterField.ExifReadStatus, exifFields[0].Field);
                 var catalog = new FilterSuggestionCatalog(new FilterCandidate[0]);
                 var left = new FilterSuggestionWindow(first, () => Task.FromResult(catalog), true, true);
                 var right = new FilterSuggestionWindow(second, () => Task.FromResult(catalog), true, true);
